@@ -111,6 +111,10 @@ module.exports = [
         "description": "Light digits on a dark LCD, like a negative-display watch. The case keeps its color."
       },
       {
+        "type": "toggle", "messageKey": "Slanted", "label": "Slanted digits", "defaultValue": true,
+        "description": "Lean the digits like the original watch. Straight digits are sharper."
+      },
+      {
         "type": "toggle", "messageKey": "Ghosts", "label": "Show unlit segments",
         "defaultValue": true,
         "description": "Faintly show the segments that are off, like a real LCD."

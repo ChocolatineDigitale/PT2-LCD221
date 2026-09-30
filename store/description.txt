@@ -8,7 +8,7 @@ WHAT IT SHOWS
 - Indicators for phone connection, charging, 24-hour mode and Quiet Time
 
 SETTINGS
-Black or silver case, normal or inverted colors, unlit segments on or off, backlight color (system default, ten presets, or any of the app's 64 colors), a choice of vibration patterns when your phone disconnects or reconnects, and Reset to defaults.
+Black or silver case, normal or inverted colors, slanted or straight digits, unlit segments on or off, backlight color (system default, ten presets, or any of the app's 64 colors), a choice of vibration patterns when your phone disconnects or reconnects, and Reset to defaults.
 
 PERMISSIONS
 Location (through your phone) for the weather, and health data for steps and heart rate. The only thing that leaves your phone is a weather request to Open-Meteo containing your location rounded to about 100 meters.

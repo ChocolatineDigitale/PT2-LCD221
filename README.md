@@ -51,6 +51,7 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | | Label | `PEBBLE` (up to 12 characters, capitals; empty for none) |
 | Appearance | Case color | Black, Silver |
 | | Inverted colors | Off, On (light digits on a dark LCD, like a negative-display watch; the case keeps its color) |
+| | Slanted digits | On, Off (leans the digits like the original; straight digits have sharper edges) |
 | | Show unlit segments | On, Off |
 | | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, **Custom color...** (shows the app's own color picker, the watch's 64 colors) |
 | Alerts | Vibrate on phone disconnect | Double pulse (None, Short, Long, Double, Triple, Heartbeat, SOS) |
@@ -139,9 +140,11 @@ vibrations, the backlight colours, live heart rate, and every control on the set
 (`draw_lcd()` in `main.c`), which allows what the normal drawing API can't:
 
 - The digits are polygons (the segment outlines of the font, scaled to each digit's box). They are
-  sheared by `LCD_SLANT` (7.5%, measured from a photo of the original) and, with `LCD_AA`, their edges
-  are anti-aliased using the display's dark-gray and light-gray shades. A pixel is only ever darkened,
-  so neighbouring segments never eat into each other.
+  sheared by `LCD_SLANT` (7.5%, measured from a photo of the original) unless the "Slanted digits"
+  setting is off, and, with `LCD_AA`, their slanted edges are anti-aliased using the display's dark-gray
+  and light-gray shades. A pixel is only ever darkened, so neighbouring segments never eat into each
+  other. Upright digits are drawn without smoothing: their edges are vertical and horizontal, so plain
+  pixels are sharper than gray-fringed ones.
 - Unlit segments and dots ("ghosts") are drawn with an ordered dither: a number of dots out of 16
   (`GHOST_DENSITY`, fewer in the inverted theme). Inactive indicator labels use the same colour.
 - The indicator box labels are drawn with the system font and then squashed in the framebuffer to
@@ -162,10 +165,10 @@ Ticks come once a minute, or every second when seconds are shown.
 
 ## Changing things
 
-**Look:** the layout constants above; `LCD_SLANT` (0 = upright); `LCD_AA` (`false` turns smoothing off);
-`GHOST_DENSITY` and `GHOST_DENSITY_INVERTED` (higher = brighter unlit segments; 8 is a checkerboard);
-`BT_WIDTHS`, `LABEL_H` and
-`LABEL_OFF_DENSITY_INVERTED` for the indicator labels; and the colours themselves in `apply_theme()`.
+**Look:** the layout constants above; `LCD_SLANT` (the lean when "Slanted digits" is on); `LCD_AA` (`false`
+turns the smoothing of slanted digits off); `GHOST_DENSITY` and `GHOST_DENSITY_INVERTED` (higher =
+brighter unlit segments; 8 is a checkerboard); `BT_WIDTHS`, `LABEL_H` and `LABEL_OFF_DENSITY_INVERTED`
+for the indicator labels; and the colours themselves in `apply_theme()`.
 
 **Adding a setting** (all five steps are needed):
 

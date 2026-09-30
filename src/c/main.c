@@ -25,10 +25,12 @@
 
 // The 7-segment digits (time, date, temperature) lean like the W-221H's: LCD_SLANT
 // is the lean in thousandths of the height (75 = 7.5%, as measured on the
-// original). LCD_AA smooths their edges with the display's gray shades.
+// original). LCD_AA smooths the edges of the slanted digits with the display's gray
+// shades. Upright digits (the "Slanted digits" setting off) are drawn without
+// smoothing: their edges are vertical and horizontal, so plain pixels are sharper.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 14  // bumped whenever Settings changes layout
+#define SETTINGS_KEY 15  // bumped whenever Settings changes layout
 #define WEATHER_KEY 4  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
@@ -60,6 +62,7 @@ typedef struct {
   // Appearance
   bool silver;                 // silver case instead of black
   bool inverted;               // light digits on a dark LCD
+  bool slanted;                // digits lean like the original's (off: upright and sharper)
   bool ghosts;                 // show faint unlit segments
   uint32_t backlight;          // 0xRRGGBB tint, BACKLIGHT_SYSTEM, or BACKLIGHT_CUSTOM
   uint32_t backlight_custom;   // 0xRRGGBB, from the settings page's colour picker
@@ -92,6 +95,8 @@ static GColor s_ghost;               // unlit segments and dots (drawn dithered)
 static GColor s_frame, s_frame_text; // case (bezels) and the text printed on it
 static uint8_t s_aa[3];              // anti-aliasing shades: faint, medium, full ink
 static int s_ghost_density;          // dot density of s_ghost, out of DENSITY_FULL
+static int s_slant;                  // digit lean in thousandths of the height (0 = upright)
+static bool s_smooth;                // anti-alias the digits' edges (only while slanted)
 static int s_label_off_density;      // dot density of inactive indicator labels (drawn in s_ghost)
 
 // ---------------------------------------------------------------------------
@@ -154,8 +159,40 @@ static int floor_div(int32_t a, int32_t b) { return a >= 0 ? a / b : -((-a + b -
 // `slant` leans the shape right like italics, in thousandths of the height:
 // each row is shifted by its height above the bottom times slant/1000, with
 // sub-pixel precision so edges stay clean diagonals.
+// Upright digits: maps a 0..1000 coordinate to whole pixels so that every bar of a digit
+// has the same thickness (plain scaling gives bars of 8 and 9 pixels side by side).
+// `knots` are the bar edges in font units and `px` where they land, in pixels.
+static int snap_axis(int v, int size, const int16_t *knots, const int *px, int count) {
+  int k = 0;
+  while (k + 2 < count && v > knots[k + 1]) k++;
+  int a = k == 0 ? 0 : px[k], b = px[k + 1];
+  int ka = k == 0 ? 0 : knots[k], kb = knots[k + 1];
+  int64_t at = a * 1000 + (kb == ka ? 0 : (int64_t)(v - ka) * (b - a) * 1000 / (kb - ka));
+  return (int)((at + size / 2) / size);  // font units of the snapped pixel position
+}
+
+static void snap_poly(int w, int h, const int16_t *pts, int n, int16_t *out) {
+  static const int16_t KX[] = { 0, 243, 756, 1000 };
+  static const int16_t KY[] = { 0, 125, 438, 562, 875, 1000 };
+  int tv = (244 * w + 500) / 1000, th = (125 * h + 500) / 1000;
+  int tg = ((h - th) & 1) ? th - 1 : th;
+  int px[4] = { 0, tv, w - tv, w };
+  int py[6] = { 0, th, (h - tg) / 2, (h + tg) / 2, h - th, h };
+  for (int i = 0; i < n; i++) {
+    int xp = snap_axis(pts[2 * i], w, KX, px, 4);
+    int yp = snap_axis(pts[2 * i + 1], h, KY, py, 6);
+    out[2 * i] = (int16_t)xp;
+    out[2 * i + 1] = (int16_t)yp;
+  }
+}
+
 static void fill_poly(int x, int y, int w, int h, const int16_t *pts, int n, int slant, GColor c,
                       bool dither) {
+  int16_t snapped[16];
+  if (slant == 0 && n <= 8) {
+    snap_poly(w, h, pts, n, snapped);
+    pts = snapped;
+  }
   for (int r = 0; r < h; r++) {
     int32_t shift = (int32_t)(2 * (h - r) - 1) * slant;  // row shift, in 1/2000 px
     int32_t yn = (int32_t)(2 * r + 1) * 1000 / (2 * h);
@@ -234,7 +271,7 @@ static void fill_poly_aa(int x, int y, int w, int h, const int16_t *pts, int n, 
 }
 
 // A 7-segment digit built from the segment outlines of the "7-Segment" font by
-// Jan Bobrowski (see segments.h), scaled to the box and slanted by LCD_SLANT. Only the
+// Jan Bobrowski (see segments.h), scaled to the box and slanted by s_slant. Only the
 // segments in `present` are drawn; unlit ones appear as ghosts (if enabled),
 // drawn first so lit segments always win.
 static void draw_segments(int x, int y, int w, int h, uint8_t on, uint8_t present) {
@@ -242,8 +279,8 @@ static void draw_segments(int x, int y, int w, int h, uint8_t on, uint8_t presen
     uint8_t mask = present & (pass ? on : (uint8_t)~on);
     for (int i = 0; i < 7; i++) {
       if (!(mask & (1 << i))) continue;
-      if (pass && LCD_AA) fill_poly_aa(x, y, w, h, SEG_POLYS[i], SEG_POLY_LEN[i], LCD_SLANT);
-      else fill_poly(x, y, w, h, SEG_POLYS[i], SEG_POLY_LEN[i], LCD_SLANT,
+      if (pass && s_smooth) fill_poly_aa(x, y, w, h, SEG_POLYS[i], SEG_POLY_LEN[i], s_slant);
+      else fill_poly(x, y, w, h, SEG_POLYS[i], SEG_POLY_LEN[i], s_slant,
                      pass ? s_ink : s_ghost, !pass);
     }
   }
@@ -278,16 +315,17 @@ static const char *day_glyph(char ch) {
   }
 }
 
-// The "P" (PM) marker: a solid 11x14 LCD symbol like the W-221H's.
+// The "P" (PM) marker: a solid, square 11x14 LCD symbol like the W-221H's, with a
+// rectangular hole and square corners.
 static const char PM_BITS[] =
-  "#########.."
-  "##########."
+  "###########"
+  "###########"
   "###....####"
-  "###.....###"
-  "###.....###"
   "###....####"
-  "##########."
-  "#########.."
+  "###....####"
+  "###########"
+  "###########"
+  "###########"
   "###........"
   "###........"
   "###........"
@@ -360,6 +398,10 @@ static void update_steps(void) {
 static void apply_theme(void) {
   bool inv = s_settings.inverted;
 
+  // The digits.
+  s_slant = s_settings.slanted ? LCD_SLANT : 0;
+  s_smooth = LCD_AA && s_settings.slanted;
+
   // The LCD.
   s_ink = inv ? GColorWhite : GColorBlack;
   s_lcd = inv ? GColorBlack : GColorWhite;
@@ -410,9 +452,17 @@ static void apply_backlight(void) {
 #define LABEL_H 10      // indicator label height in rows
 
 // Row 2: the time.
-#define TIME_Y 79
-#define TIME_W 32
-#define TIME_H 62
+// Proportions measured on the W-221H: the time is ~41% of the LCD height and sits
+// just above the rule, its digits are ~7% wider than tall-relative to the LCD, and
+// they are spread across nearly the whole width: the first digit's box starts about
+// 4px from the edge, with the PM marker in the empty left part of that box. (The
+// original's marker starts level with the digits and 6px from the edge; here it is
+// nudged up and in a little.)
+#define TIME_Y 76
+#define TIME_W 35
+#define TIME_H 70
+#define PM_X 7    // the PM marker's distance from the LCD's left edge
+#define PM_DY -2  // and how many rows it sits above the top of the digits
 
 // Row 3: date (left) and seconds / temperature (right), under a 2px rule.
 #define ROW3_LINE_Y 154
@@ -630,29 +680,42 @@ static void draw_time(void) {
     if (hour == 0) hour = 12;
   }
   const int ty = TIME_Y, tw = TIME_W, th = TIME_H;
-  draw_dots(11, ty, PM_BITS, 11, 14, 1, 1, !is24 && pm);
-  draw_digit(24, ty, tw, th, (is24 || hour >= 10) ? hour / 10 : DIGIT_BLANK);
-  draw_digit(62, ty, tw, th, hour % 10);
-  // The colon's dots follow the digits' slant; their centres sit 22px from the
-  // top and 22px from the bottom of the digit height.
-  fill(101 + (th - 22) * LCD_SLANT / 1000, ty + 19, 6, 6, s_ink, false);
-  fill(101 + 22 * LCD_SLANT / 1000, ty + th - 25, 6, 6, s_ink, false);
-  draw_digit(114, ty, tw, th, s_now.tm_min / 10);
-  draw_digit(152, ty, tw, th, s_now.tm_min % 10);
+  if (!is24) draw_dots(PM_X, ty + PM_DY, PM_BITS, 11, 14, 1, 1, pm);  // AM/PM only in 12-hour mode
+  // Digit boxes (left edges) and the colon, spread like the original's.
+  static const int X[4] = { 6, 49, 108, 153 };
+  const int colon_x = 93;
+  int tens = (is24 || hour >= 10) ? hour / 10 : DIGIT_BLANK;
+  if (is24) {
+    draw_digit(X[0], ty, tw, th, tens);
+  } else {
+    // In 12-hour mode the first digit can only be a 1 (or blank), so it only has
+    // the two right-hand segments, as on the real watch. This also keeps the PM
+    // marker clear of an unlit digit.
+    draw_segments(X[0], ty, tw, th, tens == 1 ? SEG_B | SEG_C : 0, SEG_B | SEG_C);
+  }
+  draw_digit(X[1], ty, tw, th, hour % 10);
+  // The colon's dots follow the digits' slant. As on the original, their centres
+  // sit 36% and 70% of the way down the digits (not symmetrically).
+  const int dot = 7, dot1 = th * 36 / 100, dot2 = th * 70 / 100;  // dot size; centres below the top
+  fill(colon_x + (th - dot1) * s_slant / 1000, ty + dot1 - dot / 2, dot, dot, s_ink, false);
+  fill(colon_x + (th - dot2) * s_slant / 1000, ty + dot2 - dot / 2, dot, dot, s_ink, false);
+  draw_digit(X[2], ty, tw, th, s_now.tm_min / 10);
+  draw_digit(X[3], ty, tw, th, s_now.tm_min % 10);
 }
 
-// The date as "DD-MM" or "MM-DD". Like the W-221H, it is ~84% the height of the
-// right-hand digits, centred vertically between the rule and the LCD's edge.
+// The date as "DD-MM" or "MM-DD". As on the W-221H, its digits are about 72% as
+// tall as the right box's and share their baseline (so the time stands out); the
+// last digit ends where it did before, ~19px short of the divider.
 static void draw_date(void) {
   int first = s_settings.day_first ? s_now.tm_mday : s_now.tm_mon + 1;
   int second = s_settings.day_first ? s_now.tm_mon + 1 : s_now.tm_mday;
-  const int w = 16, h = 30, top = 156, box_h = LCD_Y + LCD_H - top;
-  const int y = top + (box_h - h) / 2;
-  draw_digit(17, y, w, h, first >= 10 ? first / 10 : DIGIT_BLANK);
-  draw_digit(36, y, w, h, first % 10);
-  draw_segments(54, y, 10, h, SEG_G, SEG_G);  // dash: the font's middle bar
-  draw_digit(66, y, w, h, second / 10);
-  draw_digit(85, y, w, h, second % 10);
+  const int w = 15, h = 26;
+  const int y = ROW3_Y + ROW3_H - h;  // bottom aligned with the right box's digits
+  draw_digit(19, y, w, h, first >= 10 ? first / 10 : DIGIT_BLANK);
+  draw_digit(38, y, w, h, first % 10);
+  draw_segments(56, y, 8, h, SEG_G, SEG_G);  // dash: the font's middle bar
+  draw_digit(67, y, w, h, second / 10);
+  draw_digit(86, y, w, h, second % 10);
 }
 
 // Right box, option 1: the seconds, two digits centred in the box.
@@ -694,7 +757,7 @@ static void draw_temperature(void) {
     "##...##"
     ".#####."
     "..###..";
-  draw_dots(TEMP_X + 180 + (dh - 4) * LCD_SLANT / 1000, dy, DEGREE_BITS, 7, 7, 1, 1, true);
+  draw_dots(TEMP_X + 180 + (dh - 4) * s_slant / 1000, dy, DEGREE_BITS, 7, 7, 1, 1, true);
 }
 
 // Everything on the white LCD panel, drawn straight into the framebuffer.
@@ -971,6 +1034,10 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     s_settings.inverted = tuple_int(t);
     settings_changed = true;
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_Slanted))) {
+    s_settings.slanted = tuple_int(t);
+    settings_changed = true;
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_Ghosts))) {
     s_settings.ghosts = tuple_int(t);
     settings_changed = true;
@@ -1031,6 +1098,7 @@ static void init(void) {
     .show_steps = true,
     .top_right = "WR 3ATM",
     .bezel_label = "PEBBLE",
+    .slanted = true,
     .ghosts = true,
     .backlight = BACKLIGHT_SYSTEM,
     .vibe_disconnect = VIBE_DOUBLE,

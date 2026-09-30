@@ -1,0 +1,44 @@
+{
+  "name": "pt2-w221h",
+  "author": "Kicou",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "PT2 W-221H",
+    "uuid": "3d82e92e-32bf-42f7-b032-74baaf671d11",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["emery"],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": ["configurable", "location", "health"],
+    "messageKeys": [
+      "Temp",
+      "RequestWeather",
+      "TempUnit",
+      "DateFormat",
+      "TimeFormat",
+      "VibeDisconnect",
+      "VibeConnect",
+      "Theme",
+      "BacklightColor",
+      "Ghosts",
+      "HeartRate",
+      "BezelLabel",
+      "RightBox",
+      "ShowBattery",
+      "ShowSteps",
+      "TopLeftText",
+      "TopRightText"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

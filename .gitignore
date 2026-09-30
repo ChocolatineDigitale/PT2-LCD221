@@ -1,0 +1,7 @@
+# Build output and tooling
+build/
+.lock-waf_*
+node_modules/
+
+# Emulator screenshots taken during development
+assets/screens/

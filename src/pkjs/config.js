@@ -63,7 +63,7 @@ module.exports = [
       },
       {
         "type": "input", "messageKey": "TopLeftText", "label": "Left text",
-        "defaultValue": "3 DAY BATTERY",
+        "defaultValue": "30 DAY BATT",
         "description": "Shown instead of the battery level, in capitals. Leave empty for none.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       },

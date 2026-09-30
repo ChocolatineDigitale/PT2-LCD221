@@ -44,7 +44,7 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | Right box | Right box shows | Temperature, Seconds (redraws every second: uses more battery) |
 | | Temperature unit | Celsius, Fahrenheit (only shown while the right box shows the temperature) |
 | Top bezel | Show battery level | On. When off, the left text is shown instead |
-| | Left text | `3 DAY BATTERY` (up to 19 characters, capitals; only shown while the battery level is off) |
+| | Left text | `30 DAY BATT` (up to 19 characters, capitals; only shown while the battery level is off) |
 | | Show step count | On. When off, the right text is shown instead |
 | | Right text | `WR 3ATM` (up to 19 characters, capitals; only shown while the step count is off) |
 | Bottom bezel | Show heart rate | Off. When on, the WR badge becomes HR with the latest heart rate |

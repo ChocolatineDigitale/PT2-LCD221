@@ -1094,7 +1094,7 @@ static void init(void) {
   s_settings = (Settings){
     .day_first = true,
     .show_battery = true,
-    .top_left = "3 DAY BATTERY",
+    .top_left = "30 DAY BATT",
     .show_steps = true,
     .top_right = "WR 3ATM",
     .bezel_label = "PEBBLE",

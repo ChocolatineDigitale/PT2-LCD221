@@ -28,7 +28,7 @@
 // original). LCD_AA smooths their edges with the display's gray shades.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 11  // bumped whenever Settings changes layout
+#define SETTINGS_KEY 12  // bumped whenever Settings changes layout
 #define WEATHER_KEY 4  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
@@ -55,6 +55,7 @@ typedef struct {
   bool show_steps;       // top-right: step count, else top_right
   char top_left[20];     // top-left text when the battery level is off, upper-cased
   char top_right[20];    // top-right text when the step count is off, upper-cased
+  bool inverted;         // light digits on a dark LCD
 } Settings;
 
 typedef struct {
@@ -74,14 +75,31 @@ static bool s_connected;
 static int s_steps = -1;
 static int s_hr = -1;  // latest heart rate in BPM, -1 if unavailable
 
-static GColor s_ink, s_ghost, s_lcd, s_frame, s_frame_text;
+// Theme (see apply_theme). Normal: black ink on a white LCD. Inverted: white ink
+// on a black LCD, with every shade swapped accordingly.
+static GColor s_ink, s_lcd;          // digits, lines and lit text; the LCD's background
+static GColor s_ghost;               // unlit segments and dots (drawn dithered)
+static GColor s_frame, s_frame_text; // case (bezels) and the text printed on it
+static GColor s_box_gray;            // dots on the indicator box's background (= s_lcd: plain)
+static GColor s_label_off;           // inactive indicator labels
+static uint8_t s_aa[3];              // anti-aliasing shades: faint, medium, full ink
+static int s_ghost_density;          // dot density of s_ghost, out of DENSITY_FULL
+static int s_label_off_density;      // dot density of s_label_off, out of DENSITY_FULL
 
 // ---------------------------------------------------------------------------
 // Framebuffer raster primitives
 
-// Ghost density: pixels whose 4x4 Bayer threshold is below this (out of 16)
-// are drawn. 4 = 25%, 6 = 37.5%, 8 = 50% (checkerboard).
+// Dithering: a shape is drawn as a dot pattern whose density is a number out of
+// DENSITY_FULL (a pixel is drawn when its 4x4 Bayer threshold is below it), so
+// 4 = 25%, 8 = 50% (checkerboard) and 16 = solid.
+#define DENSITY_FULL 16
+// Unlit segments and dots ("ghosts"). The inverted theme uses fewer dots, because
+// light dots on black look brighter than dark dots on white.
 #define GHOST_DENSITY 7
+#define GHOST_DENSITY_INVERTED 4
+// Inactive indicator labels are solid, except when inverted: dark gray is the
+// darkest shade the display has, so they are drawn as dots instead.
+#define LABEL_OFF_DENSITY_INVERTED 8
 static const uint8_t BAYER4[4][4] = {
   { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 },
 };
@@ -92,7 +110,7 @@ static void span(int y, int x0, int x1, GColor c, bool dither) {
   if (x0 < row.min_x) x0 = row.min_x;
   if (x1 > row.max_x) x1 = row.max_x;
   for (int x = x0; x <= x1; x++) {
-    if (!dither || BAYER4[y & 3][x & 3] < GHOST_DENSITY) row.data[x] = c.argb;
+    if (!dither || BAYER4[y & 3][x & 3] < s_ghost_density) row.data[x] = c.argb;
   }
 }
 
@@ -161,7 +179,6 @@ static void fill_poly(int x, int y, int w, int h, const int16_t *pts, int n, int
 #define AA_SUB 4
 #define AA_MAX_W 96
 static void fill_poly_aa(int x, int y, int w, int h, const int16_t *pts, int n, int slant) {
-  static const uint8_t SHADES[] = { GColorLightGrayARGB8, GColorDarkGrayARGB8, GColorBlackARGB8 };
   int32_t cov[AA_MAX_W];
   int cols = w + h * slant / 1000 + 2;
   if (cols > AA_MAX_W) cols = AA_MAX_W;
@@ -202,8 +219,8 @@ static void fill_poly_aa(int x, int y, int w, int h, const int16_t *pts, int n, 
       int xx = x + c;
       if (level < 0 || xx < row.min_x || xx > row.max_x) continue;
       uint8_t cur = row.data[xx];
-      int cur_level = cur == GColorBlackARGB8 ? 2 : cur == GColorDarkGrayARGB8 ? 1 : -1;
-      if (level > cur_level) row.data[xx] = SHADES[level];
+      int cur_level = cur == s_aa[2] ? 2 : cur == s_aa[1] ? 1 : -1;
+      if (level > cur_level) row.data[xx] = s_aa[level];
     }
   }
 }
@@ -333,9 +350,25 @@ static void update_steps(void) {
 }
 
 static void apply_theme(void) {
-  s_ink = GColorBlack;
-  s_ghost = GColorLightGray;
-  s_lcd = GColorWhite;
+  bool inv = s_settings.inverted;
+
+  // The LCD.
+  s_ink = inv ? GColorWhite : GColorBlack;
+  s_lcd = inv ? GColorBlack : GColorWhite;
+  s_ghost = inv ? GColorDarkGray : GColorLightGray;
+  s_ghost_density = inv ? GHOST_DENSITY_INVERTED : GHOST_DENSITY;
+  // Anti-aliasing shades from faint to full ink.
+  s_aa[0] = inv ? GColorDarkGrayARGB8 : GColorLightGrayARGB8;
+  s_aa[1] = inv ? GColorLightGrayARGB8 : GColorDarkGrayARGB8;
+  s_aa[2] = inv ? GColorWhiteARGB8 : GColorBlackARGB8;
+
+  // The indicator box: gray dots on white; plain black when inverted, so that
+  // lit and unlit labels stay easy to tell apart.
+  s_box_gray = inv ? GColorBlack : GColorLightGray;
+  s_label_off = GColorDarkGray;
+  s_label_off_density = inv ? LABEL_OFF_DENSITY_INVERTED : DENSITY_FULL;
+
+  // The case does not depend on the theme.
   s_frame = s_settings.silver ? GColorLightGray : GColorBlack;
   s_frame_text = s_settings.silver ? GColorBlack : GColorWhite;
 }
@@ -368,6 +401,11 @@ static void apply_backlight(void) {
 #define BOX_MID 48      // indicator box, middle divider
 #define BOX_RADIUS 6    // indicator box, radius of the rounded corners
 #define LABEL_H 8       // indicator label height in rows
+// Indicator box background: light gray dots on the white LCD, so it looks like a
+// lighter gray than the display's own light gray (plain black when inverted).
+// BOX_BG_DENSITY is how many pixels out of DENSITY_FULL are gray (DENSITY_FULL =
+// solid light gray, 8 = checkerboard, 0 = plain white).
+#define BOX_BG_DENSITY 6
 
 // Row 2: the time.
 #define TIME_Y 79
@@ -384,6 +422,11 @@ static void apply_backlight(void) {
 // Bezels.
 #define TOP_RIGHT_MAX 104  // widest the top-right bezel text may be
 #define BOTTOM_CAP 208     // top of the bottom bezel's 14px capitals (centred in the bezel)
+
+// The indicator box's background colour at a pixel (see BOX_BG_DENSITY).
+static uint8_t box_bg_argb(int x, int y) {
+  return BAYER4[y & 3][x & 3] < BOX_BG_DENSITY ? s_box_gray.argb : s_lcd.argb;
+}
 
 static const char *const DAYS[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
 
@@ -410,12 +453,13 @@ static void draw_bezel_text(GContext *ctx, const char *text, int x, int y, int w
 //  - vertically to `height` rows by dropping duplicate rows (repeated rows in
 //    stems), so horizontal bars keep their thickness;
 //  - optionally horizontally, each letter to its own width `letter_w[i]`
-//    (NULL = keep the width), with 2px letter gaps and stems kept at 2px.
+//    (NULL = keep the width), with 2px letter gaps and stems kept at 2px;
+//  - drawn with the ordered dither at `density` (out of DENSITY_FULL).
 // The result is centred in `cell`; only the cell's interior is touched.
 #define FIT_MAX_W 64
 #define FIT_MAX_H 16
 static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const int8_t *letter_w,
-                             int height, GColor color, GColor bg) {
+                             int height, GColor color, int density) {
   // Gothic 18 bold capitals start 7px below the text box's top.
   GRect box = GRect(cell.origin.x - 1, cell.origin.y - 7, cell.size.w + 2, 22);
   draw_text(ctx, text, box, GTextAlignmentCenter, color);
@@ -445,8 +489,8 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
   for (int y = 0; y < h; y++) {
     GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, iy0 + y);
     for (int x = 0; x < w; x++) {
-      buf[y][x] = row.data[ix0 + x];
-      row.data[ix0 + x] = bg.argb;
+      buf[y][x] = row.data[ix0 + x] == color.argb;  // 1 = ink
+      row.data[ix0 + x] = box_bg_argb(ix0 + x, iy0 + y);
     }
   }
 
@@ -478,18 +522,18 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
     while (x < w) {
       // Next letter: a run of columns containing ink in the kept rows.
       bool ink = false;
-      for (int y = 0; y < n; y++) ink |= buf[rows[y]][x] == color.argb;
+      for (int y = 0; y < n; y++) ink |= buf[rows[y]][x];
       if (!ink) { x++; continue; }
       int start = x;
       while (x < w) {
         bool col = false;
-        for (int y = 0; y < n; y++) col |= buf[rows[y]][x] == color.argb;
+        for (int y = 0; y < n; y++) col |= buf[rows[y]][x];
         if (!col) break;
         x++;
       }
       int nat = x - start, tw = letter_w[letter] > nat ? letter_w[letter] : nat;
       if (kept > 0) {
-        for (int y = 0; y < n; y++) out[y][kept] = out[y][kept + 1] = bg.argb;
+        for (int y = 0; y < n; y++) out[y][kept] = out[y][kept + 1] = 0;
         kept += 2;
       }
       if (kept + tw > FIT_MAX_W) break;
@@ -498,9 +542,9 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
         if (tw == nat) continue;
         int run_len = 0;
         for (int i = 0; i <= tw; i++) {
-          if (i < tw && out[y][kept + i] == color.argb) { run_len++; continue; }
+          if (i < tw && out[y][kept + i]) { run_len++; continue; }
           int trim = (run_len >= 3 && run_len <= 5) ? run_len - 2 : (run_len > 5 ? 1 : 0);
-          for (int k = 1; k <= trim; k++) out[y][kept + i - k] = bg.argb;
+          for (int k = 1; k <= trim; k++) out[y][kept + i - k] = 0;
           run_len = 0;
         }
       }
@@ -515,12 +559,21 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
   int ox = (x0 + x1 + 1) / 2 - kept / 2, oy = y0 + (cell.size.h - n) / 2;
   for (int y = 0; y < n; y++) {
     GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, oy + y);
-    for (int i = 0; i < kept; i++) row.data[ox + i] = out[y][i];
+    for (int i = 0; i < kept; i++) {
+      bool ink = out[y][i] && BAYER4[(oy + y) & 3][(ox + i) & 3] < density;
+      row.data[ox + i] = ink ? color.argb : box_bg_argb(ox + i, oy + y);
+    }
   }
   graphics_release_frame_buffer(ctx, fb);
 }
 
 static bool is_24h(void) { return !s_settings.twelve_hour; }
+
+static int isqrt(int n) {
+  int r = 0;
+  while ((r + 1) * (r + 1) <= n) r++;
+  return r;
+}
 
 // The indicator box's outline. Like the W-221H, the top-right and bottom-left
 // corners are rounded (radius BOX_RADIUS); the outer frame is 2px, the inner
@@ -536,6 +589,19 @@ static void draw_indicator_frame(void) {
   const int r = BOX_RADIUS;
   const int ur_x = BOX_RIGHT - r, ur_y = BOX_TOP + r;    // top-right corner centre
   const int ll_x = BOX_LEFT + r, ll_y = BOX_BOTTOM - r;  // bottom-left corner centre
+  // Background inside the frame. In the two rounded corners it stops at the inner
+  // edge of the ring (pixel centres closer than 4.5 to the corner's centre).
+  for (int y = BOX_TOP + 2; y <= BOX_BOTTOM - 2; y++) {
+    int x0 = BOX_LEFT + 2, x1 = BOX_RIGHT - 2;
+    if (y <= ur_y && ur_x + isqrt(20 - (ur_y - y) * (ur_y - y)) < x1) {
+      x1 = ur_x + isqrt(20 - (ur_y - y) * (ur_y - y));
+    }
+    if (y >= ll_y && ll_x - isqrt(20 - (y - ll_y) * (y - ll_y)) > x0) {
+      x0 = ll_x - isqrt(20 - (y - ll_y) * (y - ll_y));
+    }
+    GBitmapDataRowInfo row = gbitmap_get_data_row_info(s_fb, y);
+    for (int x = x0; x <= x1; x++) row.data[x] = box_bg_argb(x, y);
+  }
   fill(BOX_LEFT, BOX_TOP, ur_x - BOX_LEFT, 2, s_ink, false);              // top
   fill(BOX_RIGHT - 1, ur_y, 2, BOX_BOTTOM - ur_y + 1, s_ink, false);      // right
   fill(ll_x + 1, BOX_BOTTOM - 1, BOX_RIGHT - ll_x, 2, s_ink, false);      // bottom
@@ -701,7 +767,7 @@ static void draw_indicator_labels(GContext *ctx) {
   for (unsigned i = 0; i < ARRAY_LENGTH(ind); i++) {
     if (!ind[i].on && !s_settings.ghosts) continue;
     draw_fitted_text(ctx, ind[i].label, ind[i].cell, ind[i].letter_w, LABEL_H,
-                     ind[i].on ? s_ink : GColorLightGray, s_lcd);
+                     ind[i].on ? s_ink : s_label_off, ind[i].on ? DENSITY_FULL : s_label_off_density);
   }
 }
 
@@ -713,6 +779,12 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, GRect(LCD_X, LCD_Y - 2, LCD_W, LCD_H + 4), 0, GCornerNone);
   graphics_context_set_fill_color(ctx, s_lcd);
   graphics_fill_rect(ctx, GRect(LCD_X, LCD_Y, LCD_W, LCD_H), 0, GCornerNone);
+  // A black LCD (inverted) would melt into a black case: mark the panel's edges.
+  if (s_settings.inverted && s_frame.argb == GColorBlackARGB8) {
+    graphics_context_set_fill_color(ctx, GColorDarkGray);
+    graphics_fill_rect(ctx, GRect(LCD_X, LCD_Y - 1, LCD_W, 1), 0, GCornerNone);
+    graphics_fill_rect(ctx, GRect(LCD_X, LCD_Y + LCD_H, LCD_W, 1), 0, GCornerNone);
+  }
 
   s_fb = graphics_capture_frame_buffer(ctx);
   if (!s_fb) return;
@@ -871,6 +943,10 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     copy_upper(s_settings.bezel_label, sizeof(s_settings.bezel_label), t->value->cstring);
     settings_changed = true;
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_Inverted))) {
+    s_settings.inverted = tuple_int(t);
+    settings_changed = true;
+  }
   if ((t = dict_find(iter, MESSAGE_KEY_ShowBattery))) {
     s_settings.show_battery = tuple_int(t);
     settings_changed = true;
@@ -954,7 +1030,8 @@ static void init(void) {
 
   subscribe_ticks();
   battery_state_service_subscribe(battery_handler);
-  connection_service_subscribe((ConnectionHandlers){ .pebble_app_connection_handler = connection_handler });
+  connection_service_subscribe(
+      (ConnectionHandlers){ .pebble_app_connection_handler = connection_handler });
 #if defined(PBL_HEALTH)
   health_service_events_subscribe(health_handler, NULL);
 #endif

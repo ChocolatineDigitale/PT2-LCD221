@@ -36,7 +36,8 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Right box" },
       {
-        "type": "select", "messageKey": "RightBox", "label": "Right box shows", "defaultValue": "temperature",
+        "type": "select", "messageKey": "RightBox", "label": "Right box shows",
+        "defaultValue": "temperature",
         "description": "Seconds redraw the watch face every second, which uses more battery.",
         "options": [
           { "label": "Temperature", "value": "temperature" },
@@ -44,7 +45,8 @@ module.exports = [
         ]
       },
       {
-        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit", "defaultValue": "C",
+        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
+        "defaultValue": "C",
         "options": [
           { "label": "Celsius", "value": "C" },
           { "label": "Fahrenheit", "value": "F" }
@@ -56,15 +58,21 @@ module.exports = [
     "type": "section",
     "items": [
       { "type": "heading", "defaultValue": "Top bezel" },
-      { "type": "toggle", "messageKey": "ShowBattery", "label": "Show battery level", "defaultValue": true },
       {
-        "type": "input", "messageKey": "TopLeftText", "label": "Left text", "defaultValue": "3 DAY BATTERY",
+        "type": "toggle", "messageKey": "ShowBattery", "label": "Show battery level", "defaultValue": true
+      },
+      {
+        "type": "input", "messageKey": "TopLeftText", "label": "Left text",
+        "defaultValue": "3 DAY BATTERY",
         "description": "Shown instead of the battery level, in capitals. Leave empty for none.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       },
-      { "type": "toggle", "messageKey": "ShowSteps", "label": "Show step count", "defaultValue": true },
       {
-        "type": "input", "messageKey": "TopRightText", "label": "Right text", "defaultValue": "WR 3ATM",
+        "type": "toggle", "messageKey": "ShowSteps", "label": "Show step count", "defaultValue": true
+      },
+      {
+        "type": "input", "messageKey": "TopRightText", "label": "Right text",
+        "defaultValue": "WR 3ATM",
         "description": "Shown instead of the step count, in capitals. Leave empty for none.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       }
@@ -75,7 +83,8 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Bottom bezel" },
       {
-        "type": "toggle", "messageKey": "HeartRate", "label": "Show heart rate", "defaultValue": false,
+        "type": "toggle", "messageKey": "HeartRate", "label": "Show heart rate",
+        "defaultValue": false,
         "description": "Replaces the WR badge with HR and your latest heart rate."
       },
       {
@@ -97,11 +106,18 @@ module.exports = [
         ]
       },
       {
-        "type": "toggle", "messageKey": "Ghosts", "label": "Show unlit segments", "defaultValue": true,
+        "type": "toggle", "messageKey": "Inverted", "label": "Inverted colors",
+        "defaultValue": false,
+        "description": "Light digits on a dark LCD, like a negative-display watch. The case keeps its color."
+      },
+      {
+        "type": "toggle", "messageKey": "Ghosts", "label": "Show unlit segments",
+        "defaultValue": true,
         "description": "Faintly show the segments that are off, like a real LCD."
       },
       {
-        "type": "select", "messageKey": "BacklightColor", "label": "Backlight color", "defaultValue": "system",
+        "type": "select", "messageKey": "BacklightColor", "label": "Backlight color",
+        "defaultValue": "system",
         "options": [
           { "label": "System default", "value": "system" },
           { "label": "Amber", "value": "FFA020" },
@@ -123,11 +139,13 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Alerts" },
       {
-        "type": "select", "messageKey": "VibeDisconnect", "label": "Vibrate on phone disconnect", "defaultValue": "3",
+        "type": "select", "messageKey": "VibeDisconnect", "label": "Vibrate on phone disconnect",
+        "defaultValue": "3",
         "options": VIBE_PATTERNS
       },
       {
-        "type": "select", "messageKey": "VibeConnect", "label": "Vibrate on phone reconnect", "defaultValue": "1",
+        "type": "select", "messageKey": "VibeConnect", "label": "Vibrate on phone reconnect",
+        "defaultValue": "1",
         "description": "No vibration during Quiet Time.",
         "options": VIBE_PATTERNS
       }

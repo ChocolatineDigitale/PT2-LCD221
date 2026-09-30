@@ -77,7 +77,8 @@ def main(font_path):
         "",
     ]
     for seg, poly in polys.items():
-        norm = [(round((x - x0) / (x1 - x0) * 1000), round((y1 - y) / (y1 - y0) * 1000)) for x, y in poly]
+        norm = [(round((x - x0) / (x1 - x0) * 1000), round((y1 - y) / (y1 - y0) * 1000))
+                for x, y in poly]
         flat = ", ".join("%d, %d" % p for p in norm)
         lines.append("static const int16_t SEG_POLY_%s[] = { %s };" % (seg, flat))
     lines += [
@@ -85,7 +86,8 @@ def main(font_path):
         "static const int16_t *const SEG_POLYS[7] = {",
         "  SEG_POLY_A, SEG_POLY_B, SEG_POLY_C, SEG_POLY_D, SEG_POLY_E, SEG_POLY_F, SEG_POLY_G,",
         "};",
-        "static const uint8_t SEG_POLY_LEN[7] = { %s };" % ", ".join(str(len(polys[s])) for s in "ABCDEFG"),
+        "static const uint8_t SEG_POLY_LEN[7] = { %s };"
+        % ", ".join(str(len(polys[s])) for s in "ABCDEFG"),
         "",
     ]
     out = Path(__file__).resolve().parent.parent / "src/c/segments.h"

@@ -6,6 +6,10 @@ box, between a black top bezel and bottom bezel.
 
 ![PT2 W-221H](docs/watchface.png)
 
+Inverted colors, and seconds instead of the temperature:
+
+![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
+
 Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
@@ -14,7 +18,7 @@ Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Peb
 |---|---|
 | Top bezel | Battery level and step count, or your own text instead of either (settings) |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
-| Indicator box | **BT** phone connected, **CHG** charging, **24H** 24-hour format, **MUTE** Quiet Time on. Active labels are dark, inactive ones faint |
+| Indicator box | **BT** phone connected, **CHG** charging, **24H** 24-hour format, **MUTE** Quiet Time on. The box has a light-gray background (plain black when inverted); active labels are black (white when inverted), inactive ones gray |
 | Time | Large slanted digits. A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD |
 | Right box | Temperature (°C or °F) or seconds |
@@ -46,6 +50,7 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | Bottom bezel | Show heart rate | Off. When on, the WR badge becomes HR with the latest heart rate |
 | | Label | `PEBBLE` (up to 12 characters, capitals; empty for none) |
 | Appearance | Case color | Black, Silver |
+| | Inverted colors | Off, On (light digits on a dark LCD, like a negative-display watch; the case keeps its color) |
 | | Show unlit segments | On, Off |
 | | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink |
 | Alerts | Vibrate on phone disconnect | Double pulse (None, Short, Long, Double, Triple, Heartbeat, SOS) |
@@ -103,15 +108,17 @@ vibrations, the backlight colours, live heart rate, and every control on the set
 
 ## How it works
 
-```
-src/c/main.c          The watch app: drawing, settings, services
-src/c/segments.h      The seven 7-segment outlines (generated, see below)
-src/pkjs/index.js     Phone side: weather fetch (Open-Meteo) and the settings page
-src/pkjs/config.js    The settings page layout, defaults and choices (Clay)
-src/pkjs/custom-clay.js  Runs on the settings page: hides options that don't apply, Reset button
-tools/gen_segments.py Regenerates segments.h from the 7-Segment font
-package.json          App metadata, permissions, and the app-message keys
-```
+| File | What it is |
+|---|---|
+| `src/c/main.c` | The watch app: drawing, settings, services |
+| `src/c/segments.h` | The seven 7-segment outlines (generated, see below) |
+| `src/pkjs/index.js` | Phone side: weather fetch (Open-Meteo) and the settings page |
+| `src/pkjs/config.js` | The settings page layout, defaults and choices (Clay) |
+| `src/pkjs/custom-clay.js` | Runs on the settings page: hides options that don't apply, Reset button |
+| `tools/gen_segments.py` | Regenerates `segments.h` from the 7-Segment font |
+| `tools/gen_menu_icon.py` | Redraws the 25x25 menu icon (needs Pillow) |
+| `resources/images/menu_icon.png` | The menu icon: the watch face's thumbnail in the Pebble app's list |
+| `package.json` | App metadata, permissions, and the app-message keys |
 
 **Drawing.** Everything on the white LCD panel is rasterized straight into the framebuffer
 (`draw_lcd()` in `main.c`), which allows what the normal drawing API can't:
@@ -120,10 +127,14 @@ package.json          App metadata, permissions, and the app-message keys
   sheared by `LCD_SLANT` (7.5%, measured from a photo of the original) and, with `LCD_AA`, their edges
   are anti-aliased using the display's dark-gray and light-gray shades. A pixel is only ever darkened,
   so neighbouring segments never eat into each other.
-- Unlit segments and dots ("ghosts") use an ordered dither whose density is `GHOST_DENSITY` (out of 16).
+- Unlit segments and dots ("ghosts") are drawn with an ordered dither: a number of dots out of 16
+  (`GHOST_DENSITY`, fewer in the inverted theme). The indicator box's background is light-gray dots on
+  white in the same way (`BOX_BG_DENSITY`), which gives a lighter gray than the display's own.
 - The indicator box labels are drawn with the system font and then squashed in the framebuffer to
   8 pixels tall (dropping repeated rows, so horizontal bars keep their thickness); "BT" is also widened.
 - The weekday is a 5x5 dot matrix, upright like the original. The bezel text uses the system fonts.
+- Colours come from one place, `apply_theme()`: normal (black on white) or inverted (white on black),
+  each with its own ghost and label shades. The case colour is independent of the theme.
 
 **Layout.** All positions are constants in the "Drawing" section of `main.c` (`LCD_*`, `BOX_*`,
 `TIME_*`, `ROW3_*`, `TEMP_X`, `BOTTOM_CAP`). There is one function per screen area
@@ -136,9 +147,10 @@ Ticks come once a minute, or every second when seconds are shown.
 
 ## Changing things
 
-**Look:** the constants above; `LCD_SLANT` (0 = upright), `LCD_AA` (`false` turns smoothing off),
-`GHOST_DENSITY` (higher = darker unlit segments; 8 is a checkerboard), `BT_WIDTHS` and `LABEL_H` for
-the indicator labels.
+**Look:** the layout constants above; `LCD_SLANT` (0 = upright); `LCD_AA` (`false` turns smoothing off);
+`GHOST_DENSITY` and `GHOST_DENSITY_INVERTED` (higher = brighter unlit segments; 8 is a checkerboard);
+`BOX_BG_DENSITY` (the indicator box's gray; 16 = solid); `BT_WIDTHS`, `LABEL_H` and
+`LABEL_OFF_DENSITY_INVERTED` for the indicator labels; and the colours themselves in `apply_theme()`.
 
 **Adding a setting** (all five steps are needed):
 
@@ -150,6 +162,10 @@ the indicator labels.
 4. Increase `SETTINGS_KEY`. Saved settings from the old layout are then ignored (everyone's settings
    reset once), which is safer than misreading them. The same goes for `WEATHER_KEY` and `Weather`.
 5. Use the value where it is drawn or acted on.
+
+**Thumbnail:** the Pebble app's watchface list shows the app's menu icon (`menuIcon` in
+`package.json`), including for sideloaded apps. Without one the entry has a blank thumbnail.
+To change it, edit `tools/gen_menu_icon.py` and run it.
 
 **Segment shapes:** `segments.h` is generated. To regenerate it:
 

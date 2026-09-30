@@ -1,0 +1,19 @@
+A Pebble Time 2 watch face that recreates the look of the Casio W-221H digital watch: a crisp LCD with slanted 7-segment digits, faint "unlit" segments like a real display, a dot-matrix weekday and a small BT / CHG / 24H / MUTE indicator box, all between a top and a bottom bezel.
+
+WHAT IT SHOWS
+- Time (12 or 24 hour, with the PM marker), weekday, and date (DD-MM or MM-DD)
+- Right box: the temperature (C or F) or the seconds
+- Top bezel: battery level and step count, or your own text instead of either
+- Bottom bezel: a WR badge, or HR and your latest heart rate, plus a text label of your choice
+- Indicators for phone connection, charging, 24-hour mode and Quiet Time
+
+SETTINGS
+Black or silver case, normal or inverted colors, unlit segments on or off, backlight color (system default, ten presets, or any of the app's 64 colors), a choice of vibration patterns when your phone disconnects or reconnects, and Reset to defaults.
+
+PERMISSIONS
+Location (through your phone) for the weather, and health data for steps and heart rate. The only thing that leaves your phone is a weather request to Open-Meteo containing your location rounded to about 100 meters.
+
+Pebble Time 2 only.
+
+CREDITS
+Weather data by Open-Meteo.com. Digit shapes from the 7-Segment font by Jan Bobrowski (SIL Open Font License). Casio and W-221H are trademarks of Casio Computer Co., Ltd.; this is an unofficial tribute, not affiliated with Casio or Pebble.

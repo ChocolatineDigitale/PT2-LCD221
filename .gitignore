@@ -3,3 +3,5 @@ build/
 .lock-waf_*
 node_modules/
 
+# Store upload copy of the release file
+store/*.pbw

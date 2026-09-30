@@ -1,4 +1,4 @@
-// PT2 W-221H: a watch face for the Pebble Time 2 (emery, 200x228) that imitates
+// LCD 221: a watch face for the Pebble Time 2 (emery, 200x228) that imitates
 // the Casio W-221H: a white "LCD" with slanted 7-segment digits, a dot-matrix
 // weekday and a 2x2 indicator box, between a top and a bottom bezel.
 //
@@ -28,34 +28,44 @@
 // original). LCD_AA smooths their edges with the display's gray shades.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 12  // bumped whenever Settings changes layout
+#define SETTINGS_KEY 14  // bumped whenever Settings changes layout
 #define WEATHER_KEY 4  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
 
-#define BACKLIGHT_SYSTEM 0xFFFFFFFFu
+#define BACKLIGHT_SYSTEM 0xFFFFFFFFu  // the user's normal backlight colour
+#define BACKLIGHT_CUSTOM 0xFFFFFFFEu  // use backlight_custom
 
 // Vibration patterns selectable for phone connect/disconnect.
 typedef enum {
   VIBE_NONE, VIBE_SHORT, VIBE_LONG, VIBE_DOUBLE, VIBE_TRIPLE, VIBE_HEARTBEAT, VIBE_SOS, VIBE_COUNT
 } VibeChoice;
 
+// Everything the settings page controls, grouped and ordered like the page itself
+// (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
 typedef struct {
+  // Time & date
   bool twelve_hour;
   bool day_first;
-  uint8_t vibe_disconnect;  // VibeChoice played when the phone disconnects
-  uint8_t vibe_connect;     // VibeChoice played when it reconnects
-  bool silver;
-  uint32_t backlight;  // 0xRRGGBB tint, or BACKLIGHT_SYSTEM for the user's default
-  bool ghosts;  // show faint unlit segments
-  bool heart_rate;  // HR badge + latest BPM instead of the WR badge
-  bool show_seconds;  // seconds instead of the temperature (redraws every second)
-  char bezel_label[16];  // printed on the bottom bezel, upper-cased
-  bool show_battery;     // top-left: battery level, else top_left
-  bool show_steps;       // top-right: step count, else top_right
-  char top_left[20];     // top-left text when the battery level is off, upper-cased
-  char top_right[20];    // top-right text when the step count is off, upper-cased
-  bool inverted;         // light digits on a dark LCD
+  // Right box
+  bool show_seconds;           // seconds instead of the temperature (redraws every second)
+  // Top bezel
+  bool show_battery;           // top-left: battery level, else top_left
+  char top_left[20];           // top-left text when the battery level is off, upper-cased
+  bool show_steps;             // top-right: step count, else top_right
+  char top_right[20];          // top-right text when the step count is off, upper-cased
+  // Bottom bezel
+  bool heart_rate;             // HR badge + latest BPM instead of the WR badge
+  char bezel_label[16];        // printed on the bottom bezel, upper-cased
+  // Appearance
+  bool silver;                 // silver case instead of black
+  bool inverted;               // light digits on a dark LCD
+  bool ghosts;                 // show faint unlit segments
+  uint32_t backlight;          // 0xRRGGBB tint, BACKLIGHT_SYSTEM, or BACKLIGHT_CUSTOM
+  uint32_t backlight_custom;   // 0xRRGGBB, from the settings page's colour picker
+  // Alerts
+  uint8_t vibe_disconnect;     // VibeChoice played when the phone disconnects
+  uint8_t vibe_connect;        // VibeChoice played when it reconnects
 } Settings;
 
 typedef struct {
@@ -80,11 +90,9 @@ static int s_hr = -1;  // latest heart rate in BPM, -1 if unavailable
 static GColor s_ink, s_lcd;          // digits, lines and lit text; the LCD's background
 static GColor s_ghost;               // unlit segments and dots (drawn dithered)
 static GColor s_frame, s_frame_text; // case (bezels) and the text printed on it
-static GColor s_box_gray;            // dots on the indicator box's background (= s_lcd: plain)
-static GColor s_label_off;           // inactive indicator labels
 static uint8_t s_aa[3];              // anti-aliasing shades: faint, medium, full ink
 static int s_ghost_density;          // dot density of s_ghost, out of DENSITY_FULL
-static int s_label_off_density;      // dot density of s_label_off, out of DENSITY_FULL
+static int s_label_off_density;      // dot density of inactive indicator labels (drawn in s_ghost)
 
 // ---------------------------------------------------------------------------
 // Framebuffer raster primitives
@@ -362,10 +370,8 @@ static void apply_theme(void) {
   s_aa[1] = inv ? GColorLightGrayARGB8 : GColorDarkGrayARGB8;
   s_aa[2] = inv ? GColorWhiteARGB8 : GColorBlackARGB8;
 
-  // The indicator box: gray dots on white; plain black when inverted, so that
-  // lit and unlit labels stay easy to tell apart.
-  s_box_gray = inv ? GColorBlack : GColorLightGray;
-  s_label_off = GColorDarkGray;
+  // Inactive indicator labels use the ghost colour: solid on the white LCD,
+  // dotted when inverted (dark gray is the darkest shade there is, so dots make it dimmer).
   s_label_off_density = inv ? LABEL_OFF_DENSITY_INVERTED : DENSITY_FULL;
 
   // The case does not depend on the theme.
@@ -376,6 +382,7 @@ static void apply_theme(void) {
 static void apply_backlight(void) {
 #if defined(PBL_RGB_BACKLIGHT)
   if (s_settings.backlight == BACKLIGHT_SYSTEM) light_set_system_color();
+  else if (s_settings.backlight == BACKLIGHT_CUSTOM) light_set_color_rgb888(s_settings.backlight_custom);
   else light_set_color_rgb888(s_settings.backlight);
 #endif
 }
@@ -396,16 +403,11 @@ static void apply_backlight(void) {
 #define BOX_LEFT 109    // indicator box, left outer line (left cells as wide as the right ones)
 #define BOX_RIGHT 191   // indicator box, right outer line
 #define BOX_DIV 150     // indicator box, vertical divider (off-centre: MUTE is widest)
-#define BOX_TOP 35      // indicator box, top outer line
+#define BOX_TOP 34      // indicator box, top outer line (= weekday top)
 #define BOX_BOTTOM 62   // indicator box, bottom outer line (= weekday bottom)
 #define BOX_MID 48      // indicator box, middle divider
 #define BOX_RADIUS 6    // indicator box, radius of the rounded corners
-#define LABEL_H 8       // indicator label height in rows
-// Indicator box background: light gray dots on the white LCD, so it looks like a
-// lighter gray than the display's own light gray (plain black when inverted).
-// BOX_BG_DENSITY is how many pixels out of DENSITY_FULL are gray (DENSITY_FULL =
-// solid light gray, 8 = checkerboard, 0 = plain white).
-#define BOX_BG_DENSITY 6
+#define LABEL_H 10      // indicator label height in rows
 
 // Row 2: the time.
 #define TIME_Y 79
@@ -422,11 +424,6 @@ static void apply_backlight(void) {
 // Bezels.
 #define TOP_RIGHT_MAX 104  // widest the top-right bezel text may be
 #define BOTTOM_CAP 208     // top of the bottom bezel's 14px capitals (centred in the bezel)
-
-// The indicator box's background colour at a pixel (see BOX_BG_DENSITY).
-static uint8_t box_bg_argb(int x, int y) {
-  return BAYER4[y & 3][x & 3] < BOX_BG_DENSITY ? s_box_gray.argb : s_lcd.argb;
-}
 
 static const char *const DAYS[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
 
@@ -449,15 +446,53 @@ static void draw_bezel_text(GContext *ctx, const char *text, int x, int y, int w
 
 // Draws a label so it fits its indicator-box cell. The text is drawn in the
 // bold font with its ink starting on the cell's top row, then re-sampled in
-// the framebuffer (nearest-neighbour, so edges stay crisp):
-//  - vertically to `height` rows by dropping duplicate rows (repeated rows in
-//    stems), so horizontal bars keep their thickness;
+// the framebuffer (nearest-neighbour, so edges stay crisp), one letter at a time:
+//  - vertically to `height` rows by dropping rows from inside each letter (see
+//    row_to_drop), so horizontal bars keep their thickness;
 //  - optionally horizontally, each letter to its own width `letter_w[i]`
 //    (NULL = keep the width), with 2px letter gaps and stems kept at 2px;
 //  - drawn with the ordered dither at `density` (out of DENSITY_FULL).
 // The result is centred in `cell`; only the cell's interior is touched.
 #define FIT_MAX_W 64
 #define FIT_MAX_H 16
+#define FIT_MAX_LETTERS 8
+#define BAR_RUN 4  // a horizontal run of this many ink pixels makes a row part of a bar
+
+typedef uint8_t FitRows[FIT_MAX_H][FIT_MAX_W];
+
+// The longest horizontal run of ink in one row of a letter (columns x0..x1).
+static int longest_run(const FitRows buf, int y, int x0, int x1) {
+  int best = 0, run = 0;
+  for (int x = x0; x <= x1; x++) {
+    run = buf[y][x] ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+// Which of a letter's `n` rows (rows[] holds their indices into buf) to drop when it
+// is one row too tall. Never the first or last row, and rows that belong to a
+// horizontal bar are avoided (dropping one would thin the bar to 1px while the
+// letter's other bars stay 2px). Among the rest, the row most like its neighbour
+// wins, then the one nearest the middle of the letter, where a letter is usually
+// just vertical strokes.
+static int row_to_drop(const FitRows buf, const int *rows, int n, int x0, int x1) {
+  int best = n / 2, best_cost = 1 << 30;
+  for (int i = 1; i < n - 1; i++) {
+    int up = 0, down = 0;
+    for (int x = x0; x <= x1; x++) {
+      up += buf[rows[i]][x] != buf[rows[i - 1]][x];
+      down += buf[rows[i]][x] != buf[rows[i + 1]][x];
+    }
+    int like = up < down ? up : down;  // differences from the most similar neighbour
+    int bar = longest_run(buf, rows[i], x0, x1) >= BAR_RUN ? 1000 : 0;
+    int middle = abs(2 * i - (n - 1));
+    int cost = bar + like * 10 + middle;
+    if (cost < best_cost) { best_cost = cost; best = i; }
+  }
+  return best;
+}
+
 static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const int8_t *letter_w,
                              int height, GColor color, int density) {
   // Gothic 18 bold capitals start 7px below the text box's top.
@@ -485,95 +520,78 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
     graphics_release_frame_buffer(ctx, fb);
     return;
   }
-  static uint8_t buf[FIT_MAX_H][FIT_MAX_W], out[FIT_MAX_H][FIT_MAX_W];
+  static FitRows buf, out;
   for (int y = 0; y < h; y++) {
     GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, iy0 + y);
     for (int x = 0; x < w; x++) {
       buf[y][x] = row.data[ix0 + x] == color.argb;  // 1 = ink
-      row.data[ix0 + x] = box_bg_argb(ix0 + x, iy0 + y);
+      row.data[ix0 + x] = s_lcd.argb;
     }
   }
 
-  // Vertical: until it fits, drop the row that differs least from the row
-  // above it (identical rows first, preferring the longest run of them), so
-  // distinctive rows such as the H's crossbar are kept.
-  int rows[FIT_MAX_H], n = h;
-  for (int i = 0; i < h; i++) rows[i] = i;
-  while (n > height) {
-    int best = 1, best_diff = w + 1, best_run = 0, run = 0;
-    for (int i = 1; i < n; i++) {
-      int diff = 0;
-      for (int x = 0; x < w; x++) diff += buf[rows[i]][x] != buf[rows[i - 1]][x];
-      run = diff == 0 ? run + 1 : 0;
-      if (diff < best_diff || (diff == best_diff && run > best_run)) {
-        best = i; best_diff = diff; best_run = run;
+  // Re-sample one letter (a run of columns with ink) at a time into `out`.
+  int rows_out = h > height ? height : h;
+  int kept = 0, letter = 0, prev_end = 0;
+  for (int x = 0; x < w && letter < FIT_MAX_LETTERS;) {
+    bool ink = false;
+    for (int y = 0; y < h; y++) ink |= buf[y][x];
+    if (!ink) { x++; continue; }
+    int start = x;
+    for (; x < w; x++) {
+      bool col = false;
+      for (int y = 0; y < h; y++) col |= buf[y][x];
+      if (!col) break;
+    }
+    int len = x - start, last = x - 1;
+
+    // Vertical: drop rows from this letter until it fits.
+    int rows[FIT_MAX_H], n = h;
+    for (int i = 0; i < h; i++) rows[i] = i;
+    while (n > height) {
+      int drop = row_to_drop(buf, rows, n, start, last);
+      for (int i = drop; i < n - 1; i++) rows[i] = rows[i + 1];
+      n--;
+    }
+
+    // Horizontal: keep the letter's width (and the text's own spacing), or
+    // stretch it, with stems trimmed back to the bold font's 2px (bars by 1px).
+    int tw = len, gap = 0;
+    if (letter_w) {
+      tw = letter_w[letter] > len ? letter_w[letter] : len;
+      gap = kept > 0 ? 2 : 0;
+    } else if (kept > 0) {
+      gap = start - prev_end - 1;
+    }
+    if (kept + gap + tw > FIT_MAX_W) break;
+    for (int y = 0; y < rows_out; y++) {
+      for (int i = 0; i < gap; i++) out[y][kept + i] = 0;
+      for (int i = 0; i < tw; i++) out[y][kept + gap + i] = buf[rows[y]][start + i * len / tw];
+      if (tw == len) continue;
+      int run_len = 0;
+      for (int i = 0; i <= tw; i++) {
+        if (i < tw && out[y][kept + gap + i]) { run_len++; continue; }
+        int trim = (run_len >= 3 && run_len <= 5) ? run_len - 2 : (run_len > 5 ? 1 : 0);
+        for (int k = 1; k <= trim; k++) out[y][kept + gap + i - k] = 0;
+        run_len = 0;
       }
     }
-    for (int i = best; i < n - 1; i++) rows[i] = rows[i + 1];
-    n--;
+    kept += gap + tw;
+    prev_end = last;
+    letter++;
   }
 
-  // Horizontal: optionally stretch each letter to its own width (letter_w[i],
-  // 0 = natural), with a 2px gap between letters. Stretched stems are trimmed
-  // back to the bold font's 2px (bars by 1px) so the weight stays the same.
-  int kept = 0;
-  if (letter_w) {
-    int x = 0, letter = 0;
-    while (x < w) {
-      // Next letter: a run of columns containing ink in the kept rows.
-      bool ink = false;
-      for (int y = 0; y < n; y++) ink |= buf[rows[y]][x];
-      if (!ink) { x++; continue; }
-      int start = x;
-      while (x < w) {
-        bool col = false;
-        for (int y = 0; y < n; y++) col |= buf[rows[y]][x];
-        if (!col) break;
-        x++;
-      }
-      int nat = x - start, tw = letter_w[letter] > nat ? letter_w[letter] : nat;
-      if (kept > 0) {
-        for (int y = 0; y < n; y++) out[y][kept] = out[y][kept + 1] = 0;
-        kept += 2;
-      }
-      if (kept + tw > FIT_MAX_W) break;
-      for (int y = 0; y < n; y++) {
-        for (int i = 0; i < tw; i++) out[y][kept + i] = buf[rows[y]][start + i * nat / tw];
-        if (tw == nat) continue;
-        int run_len = 0;
-        for (int i = 0; i <= tw; i++) {
-          if (i < tw && out[y][kept + i]) { run_len++; continue; }
-          int trim = (run_len >= 3 && run_len <= 5) ? run_len - 2 : (run_len > 5 ? 1 : 0);
-          for (int k = 1; k <= trim; k++) out[y][kept + i - k] = 0;
-          run_len = 0;
-        }
-      }
-      kept += tw;
-      letter++;
-    }
-  } else {
-    for (int y = 0; y < n; y++) memcpy(out[y], buf[rows[y]], w);
-    kept = w;
-  }
-
-  int ox = (x0 + x1 + 1) / 2 - kept / 2, oy = y0 + (cell.size.h - n) / 2;
-  for (int y = 0; y < n; y++) {
+  int ox = (x0 + x1 + 1) / 2 - kept / 2, oy = y0 + (cell.size.h - rows_out) / 2;
+  for (int y = 0; y < rows_out; y++) {
     GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, oy + y);
     for (int i = 0; i < kept; i++) {
-      bool ink = out[y][i] && BAYER4[(oy + y) & 3][(ox + i) & 3] < density;
-      row.data[ox + i] = ink ? color.argb : box_bg_argb(ox + i, oy + y);
+      bool lit = out[y][i] && BAYER4[(oy + y) & 3][(ox + i) & 3] < density;
+      row.data[ox + i] = lit ? color.argb : s_lcd.argb;
     }
   }
   graphics_release_frame_buffer(ctx, fb);
 }
 
 static bool is_24h(void) { return !s_settings.twelve_hour; }
-
-static int isqrt(int n) {
-  int r = 0;
-  while ((r + 1) * (r + 1) <= n) r++;
-  return r;
-}
 
 // The indicator box's outline. Like the W-221H, the top-right and bottom-left
 // corners are rounded (radius BOX_RADIUS); the outer frame is 2px, the inner
@@ -589,19 +607,6 @@ static void draw_indicator_frame(void) {
   const int r = BOX_RADIUS;
   const int ur_x = BOX_RIGHT - r, ur_y = BOX_TOP + r;    // top-right corner centre
   const int ll_x = BOX_LEFT + r, ll_y = BOX_BOTTOM - r;  // bottom-left corner centre
-  // Background inside the frame. In the two rounded corners it stops at the inner
-  // edge of the ring (pixel centres closer than 4.5 to the corner's centre).
-  for (int y = BOX_TOP + 2; y <= BOX_BOTTOM - 2; y++) {
-    int x0 = BOX_LEFT + 2, x1 = BOX_RIGHT - 2;
-    if (y <= ur_y && ur_x + isqrt(20 - (ur_y - y) * (ur_y - y)) < x1) {
-      x1 = ur_x + isqrt(20 - (ur_y - y) * (ur_y - y));
-    }
-    if (y >= ll_y && ll_x - isqrt(20 - (y - ll_y) * (y - ll_y)) > x0) {
-      x0 = ll_x - isqrt(20 - (y - ll_y) * (y - ll_y));
-    }
-    GBitmapDataRowInfo row = gbitmap_get_data_row_info(s_fb, y);
-    for (int x = x0; x <= x1; x++) row.data[x] = box_bg_argb(x, y);
-  }
   fill(BOX_LEFT, BOX_TOP, ur_x - BOX_LEFT, 2, s_ink, false);              // top
   fill(BOX_RIGHT - 1, ur_y, 2, BOX_BOTTOM - ur_y + 1, s_ink, false);      // right
   fill(ll_x + 1, BOX_BOTTOM - 1, BOX_RIGHT - ll_x, 2, s_ink, false);      // bottom
@@ -753,10 +758,10 @@ static void draw_bottom_bezel(GContext *ctx) {
 static void draw_indicator_labels(GContext *ctx) {
   const int top_h = BOX_MID - BOX_TOP - 2, bottom_h = BOX_BOTTOM - BOX_MID - 2;
   const int left_w = BOX_DIV - BOX_LEFT, right_w = BOX_RIGHT - BOX_DIV;
-  static const int8_t BT_WIDTHS[] = { 9, 9 };  // widened B and T
+  static const int8_t BT_WIDTHS[] = { 8, 9 };  // widened B and T
   struct { const char *label; bool on; GRect cell; const int8_t *letter_w; } ind[] = {
     { "BT",   s_connected,
-      GRect(BOX_LEFT + 2, BOX_TOP + 2, left_w - 2, top_h), BT_WIDTHS },
+      GRect(BOX_LEFT + 4, BOX_TOP + 2, left_w - 4, top_h), BT_WIDTHS },
     { "CHG",  s_battery.is_charging,
       GRect(BOX_DIV + 1, BOX_TOP + 2, right_w - 4, top_h), NULL },
     { "24H",  is_24h(),
@@ -767,7 +772,7 @@ static void draw_indicator_labels(GContext *ctx) {
   for (unsigned i = 0; i < ARRAY_LENGTH(ind); i++) {
     if (!ind[i].on && !s_settings.ghosts) continue;
     draw_fitted_text(ctx, ind[i].label, ind[i].cell, ind[i].letter_w, LABEL_H,
-                     ind[i].on ? s_ink : s_label_off, ind[i].on ? DENSITY_FULL : s_label_off_density);
+                     ind[i].on ? s_ink : s_ghost, ind[i].on ? DENSITY_FULL : s_label_off_density);
   }
 }
 
@@ -875,6 +880,24 @@ static void health_handler(HealthEventType event, void *context) {
 }
 #endif
 
+// Reads a preset colour such as "FFA020" into *rgb. Returns false, leaving *rgb
+// alone, unless it is exactly six hex digits.
+static bool parse_hex(const char *hex, uint32_t *rgb) {
+  uint32_t value = 0;
+  int digits = 0;
+  for (; *hex; hex++, digits++) {
+    char ch = *hex;
+    int d = (ch >= '0' && ch <= '9') ? ch - '0'
+          : (ch >= 'A' && ch <= 'F') ? ch - 'A' + 10
+          : (ch >= 'a' && ch <= 'f') ? ch - 'a' + 10 : -1;
+    if (d < 0) return false;
+    value = (value << 4) | d;
+  }
+  if (digits != 6) return false;
+  *rgb = value;
+  return true;
+}
+
 // Copies a settings-page text into a fixed buffer, upper-cased to match the
 // other printed text.
 static void copy_upper(char *dst, size_t size, const char *src) {
@@ -899,18 +922,73 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     s_weather.updated = time(NULL);
     persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
   }
-  if ((t = dict_find(iter, MESSAGE_KEY_DateFormat))) {
-    s_settings.day_first = strcmp(t->value->cstring, "DM") == 0;
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_Theme))) {
-    s_settings.silver = strcmp(t->value->cstring, "light") == 0;
-    settings_changed = true;
-  }
+  // Time & date
   if ((t = dict_find(iter, MESSAGE_KEY_TimeFormat))) {
     s_settings.twelve_hour = strcmp(t->value->cstring, "12") == 0;
     settings_changed = true;
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_DateFormat))) {
+    s_settings.day_first = strcmp(t->value->cstring, "DM") == 0;
+    settings_changed = true;
+  }
+  // Right box
+  if ((t = dict_find(iter, MESSAGE_KEY_RightBox))) {
+    s_settings.show_seconds = strcmp(t->value->cstring, "seconds") == 0;
+    settings_changed = true;
+  }
+  // Top bezel
+  if ((t = dict_find(iter, MESSAGE_KEY_ShowBattery))) {
+    s_settings.show_battery = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_TopLeftText))) {
+    copy_upper(s_settings.top_left, sizeof(s_settings.top_left), t->value->cstring);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ShowSteps))) {
+    s_settings.show_steps = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_TopRightText))) {
+    copy_upper(s_settings.top_right, sizeof(s_settings.top_right), t->value->cstring);
+    settings_changed = true;
+  }
+  // Bottom bezel
+  if ((t = dict_find(iter, MESSAGE_KEY_HeartRate))) {
+    s_settings.heart_rate = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BezelLabel))) {
+    copy_upper(s_settings.bezel_label, sizeof(s_settings.bezel_label), t->value->cstring);
+    settings_changed = true;
+  }
+  // Appearance
+  if ((t = dict_find(iter, MESSAGE_KEY_CaseColor))) {
+    s_settings.silver = strcmp(t->value->cstring, "silver") == 0;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_Inverted))) {
+    s_settings.inverted = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_Ghosts))) {
+    s_settings.ghosts = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BacklightColor))) {
+    // "system", "custom" (colour in BacklightCustom), or a hex colour such as "FFA020".
+    const char *choice = t->value->cstring;
+    uint32_t rgb;
+    if (strcmp(choice, "system") == 0) s_settings.backlight = BACKLIGHT_SYSTEM;
+    else if (strcmp(choice, "custom") == 0) s_settings.backlight = BACKLIGHT_CUSTOM;
+    else if (parse_hex(choice, &rgb)) s_settings.backlight = rgb;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_BacklightCustom))) {
+    s_settings.backlight_custom = (uint32_t)tuple_int(t) & 0xFFFFFF;  // 0xRRGGBB from the picker
+    settings_changed = true;
+  }
+  // Alerts
   if ((t = dict_find(iter, MESSAGE_KEY_VibeDisconnect))) {
     int v = tuple_int(t);
     s_settings.vibe_disconnect = (v >= 0 && v < VIBE_COUNT) ? v : VIBE_NONE;
@@ -919,60 +997,6 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, MESSAGE_KEY_VibeConnect))) {
     int v = tuple_int(t);
     s_settings.vibe_connect = (v >= 0 && v < VIBE_COUNT) ? v : VIBE_NONE;
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_BacklightColor))) {
-    // "system", or a hex colour such as "FFA020".
-    const char *hex = t->value->cstring;
-    if (strcmp(hex, "system") == 0) {
-      s_settings.backlight = BACKLIGHT_SYSTEM;
-    } else {
-      uint32_t rgb = 0;
-      for (int i = 0; hex[i]; i++) {
-        char ch = hex[i];
-        int d = (ch >= '0' && ch <= '9') ? ch - '0'
-              : (ch >= 'A' && ch <= 'F') ? ch - 'A' + 10
-              : (ch >= 'a' && ch <= 'f') ? ch - 'a' + 10 : 0;
-        rgb = (rgb << 4) | d;
-      }
-      s_settings.backlight = rgb & 0xFFFFFF;
-    }
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_BezelLabel))) {
-    copy_upper(s_settings.bezel_label, sizeof(s_settings.bezel_label), t->value->cstring);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_Inverted))) {
-    s_settings.inverted = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_ShowBattery))) {
-    s_settings.show_battery = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_ShowSteps))) {
-    s_settings.show_steps = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_TopLeftText))) {
-    copy_upper(s_settings.top_left, sizeof(s_settings.top_left), t->value->cstring);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_TopRightText))) {
-    copy_upper(s_settings.top_right, sizeof(s_settings.top_right), t->value->cstring);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_RightBox))) {
-    s_settings.show_seconds = strcmp(t->value->cstring, "seconds") == 0;
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_HeartRate))) {
-    s_settings.heart_rate = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_Ghosts))) {
-    s_settings.ghosts = tuple_int(t);
     settings_changed = true;
   }
 
@@ -1002,15 +1026,15 @@ static void window_unload(Window *window) {
 static void init(void) {
   s_settings = (Settings){
     .day_first = true,
+    .show_battery = true,
+    .top_left = "3 DAY BATTERY",
+    .show_steps = true,
+    .top_right = "WR 3ATM",
+    .bezel_label = "PEBBLE",
+    .ghosts = true,
+    .backlight = BACKLIGHT_SYSTEM,
     .vibe_disconnect = VIBE_DOUBLE,
     .vibe_connect = VIBE_SHORT,
-    .backlight = BACKLIGHT_SYSTEM,
-    .ghosts = true,
-    .bezel_label = "PEBBLE",
-    .show_battery = true,
-    .show_steps = true,
-    .top_left = "3 DAY BATTERY",
-    .top_right = "WR 3ATM",
   };
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
   persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
@@ -1037,7 +1061,9 @@ static void init(void) {
 #endif
 
   app_message_register_inbox_received(inbox_handler);
-  app_message_open(256, 64);
+  // The inbox must hold a full settings Save: about 230 bytes with plain text and
+  // over 400 with emoji in the three custom texts.
+  app_message_open(512, 64);
 }
 
 static void deinit(void) {

@@ -1,16 +1,16 @@
-# PT2 W-221H
+# LCD 221
 
 A watch face for the **Pebble Time 2** that imitates the look of the Casio W-221H:
 a white LCD with slanted 7-segment digits, a dot-matrix weekday and a 2x2 indicator
 box, between a black top bezel and bottom bezel.
 
-![PT2 W-221H](docs/watchface.png)
+![LCD 221](docs/watchface.png)
 
 Inverted colors, and seconds instead of the temperature:
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 
-Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
+Version 1.0.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
 
@@ -18,7 +18,7 @@ Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Peb
 |---|---|
 | Top bezel | Battery level and step count, or your own text instead of either (settings) |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
-| Indicator box | **BT** phone connected, **CHG** charging, **24H** 24-hour format, **MUTE** Quiet Time on. The box has a light-gray background (plain black when inverted); active labels are black (white when inverted), inactive ones gray |
+| Indicator box | **BT** phone connected, **CHG** charging, **24H** 24-hour format, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
 | Time | Large slanted digits. A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD |
 | Right box | Temperature (°C or °F) or seconds |
@@ -30,7 +30,7 @@ Notes:
 - Steps come from Pebble Health. Heart rate is the latest reading the watch has; it shows `--` when there is none.
 - Weather is fetched by the phone from [Open-Meteo](https://open-meteo.com) using its location, at start-up and every 30 minutes. It shows `--` if the data is more than 3 hours old.
 - Unlit segments are drawn as a faint ghost, like a real LCD (can be switched off).
-- The Time 2's backlight is colour-capable. By default the watch face leaves it at your normal system colour, but it can tint it instead (amber like the original's LED, or any of ten colours).
+- The Time 2's backlight is colour-capable. By default the watch face leaves it at your normal system colour, but it can tint it instead (amber like the original's LED, one of ten presets, or any of the 64 colours in the app's picker).
 
 ## Settings
 
@@ -52,7 +52,7 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | Appearance | Case color | Black, Silver |
 | | Inverted colors | Off, On (light digits on a dark LCD, like a negative-display watch; the case keeps its color) |
 | | Show unlit segments | On, Off |
-| | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink |
+| | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, **Custom color...** (shows the app's own color picker, the watch's 64 colors) |
 | Alerts | Vibrate on phone disconnect | Double pulse (None, Short, Long, Double, Triple, Heartbeat, SOS) |
 | | Vibrate on phone reconnect | Short pulse (same patterns) |
 
@@ -100,6 +100,20 @@ Install on the real watch, from this computer, over Wi-Fi:
 Or copy `build/*.pbw` to the phone and open it with the Pebble app. Allow the location permission
 (for weather) and the health permission (for steps and heart rate) when asked.
 
+## Releasing
+
+`pebble build` leaves `build/<folder name>.pbw`. The SDK adds a debugging source map to it, and that
+map (and some SDK helper comments in it) contains the path of the SDK on the build computer, which
+includes your user name. For a copy you are going to share or publish, run:
+
+```sh
+python3 tools/strip_pbw.py --deny YourRealName --deny yourhost   # writes build/release.pbw
+```
+
+It drops the map, then scans every remaining file for home-directory paths and for any word you
+`--deny`, and exits with an error if it finds one. The name the app shows as its author comes from
+`author` in `package.json`; the copyright holder is in `LICENSE`.
+
 ## What the emulator can't check
 
 The emulator has no Bluetooth link to a phone app, no coloured backlight, no real steps or heart
@@ -117,6 +131,7 @@ vibrations, the backlight colours, live heart rate, and every control on the set
 | `src/pkjs/custom-clay.js` | Runs on the settings page: hides options that don't apply, Reset button |
 | `tools/gen_segments.py` | Regenerates `segments.h` from the 7-Segment font |
 | `tools/gen_menu_icon.py` | Redraws the 25x25 menu icon (needs Pillow) |
+| `tools/strip_pbw.py` | Makes a release copy of the built app with the debugging map removed, and checks it for identifying text |
 | `resources/images/menu_icon.png` | The menu icon: the watch face's thumbnail in the Pebble app's list |
 | `package.json` | App metadata, permissions, and the app-message keys |
 
@@ -128,10 +143,10 @@ vibrations, the backlight colours, live heart rate, and every control on the set
   are anti-aliased using the display's dark-gray and light-gray shades. A pixel is only ever darkened,
   so neighbouring segments never eat into each other.
 - Unlit segments and dots ("ghosts") are drawn with an ordered dither: a number of dots out of 16
-  (`GHOST_DENSITY`, fewer in the inverted theme). The indicator box's background is light-gray dots on
-  white in the same way (`BOX_BG_DENSITY`), which gives a lighter gray than the display's own.
+  (`GHOST_DENSITY`, fewer in the inverted theme). Inactive indicator labels use the same colour.
 - The indicator box labels are drawn with the system font and then squashed in the framebuffer to
-  8 pixels tall (dropping repeated rows, so horizontal bars keep their thickness); "BT" is also widened.
+  10 pixels tall, one letter at a time (the row dropped is from inside each letter, never from a
+  horizontal bar, so every bar keeps the same thickness); "BT" is also widened.
 - The weekday is a 5x5 dot matrix, upright like the original. The bezel text uses the system fonts.
 - Colours come from one place, `apply_theme()`: normal (black on white) or inverted (white on black),
   each with its own ghost and label shades. The case colour is independent of the theme.
@@ -149,7 +164,7 @@ Ticks come once a minute, or every second when seconds are shown.
 
 **Look:** the layout constants above; `LCD_SLANT` (0 = upright); `LCD_AA` (`false` turns smoothing off);
 `GHOST_DENSITY` and `GHOST_DENSITY_INVERTED` (higher = brighter unlit segments; 8 is a checkerboard);
-`BOX_BG_DENSITY` (the indicator box's gray; 16 = solid); `BT_WIDTHS`, `LABEL_H` and
+`BT_WIDTHS`, `LABEL_H` and
 `LABEL_OFF_DENSITY_INVERTED` for the indicator labels; and the colours themselves in `apply_theme()`.
 
 **Adding a setting** (all five steps are needed):
@@ -157,8 +172,10 @@ Ticks come once a minute, or every second when seconds are shown.
 1. Add the item to `src/pkjs/config.js` with a `messageKey` and a `defaultValue`.
 2. Add the same key to `messageKeys` in `package.json`, then run `pebble clean` (the key
    constants are generated at build time and are stale otherwise).
-3. Add a field to the `Settings` struct in `main.c`, its default in `init()`, and read it in
-   `inbox_handler()`.
+3. Add a field to the `Settings` struct in `main.c` (keep its groups in the order of the settings
+   page), its default in `init()`, and read it in `inbox_handler()`. A full Save arrives as one app
+   message: it is about 230 bytes with plain text and over 400 with emoji in the custom texts, and
+   the watch's inbox is 512 bytes (`app_message_open` in `init()`), so raise that if you add much.
 4. Increase `SETTINGS_KEY`. Saved settings from the old layout are then ignored (everyone's settings
    reset once), which is safer than misreading them. The same goes for `WEATHER_KEY` and `Weather`.
 5. Use the value where it is drawn or acted on.

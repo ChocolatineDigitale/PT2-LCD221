@@ -1,5 +1,5 @@
 {
-  "name": "pt2-w221h",
+  "name": "lcd-221",
   "author": "Kicou",
   "version": "1.0.0",
   "keywords": ["pebble-app"],
@@ -9,7 +9,7 @@
     "pebble-clay": "^1.0.4"
   },
   "pebble": {
-    "displayName": "PT2 W-221H",
+    "displayName": "LCD 221",
     "uuid": "3d82e92e-32bf-42f7-b032-74baaf671d11",
     "sdkVersion": "3",
     "enableMultiJS": true,
@@ -21,22 +21,23 @@
     "messageKeys": [
       "Temp",
       "RequestWeather",
-      "TempUnit",
-      "DateFormat",
       "TimeFormat",
-      "VibeDisconnect",
-      "VibeConnect",
-      "Theme",
-      "BacklightColor",
-      "Ghosts",
+      "DateFormat",
+      "RightBox",
+      "TempUnit",
+      "ShowBattery",
+      "TopLeftText",
+      "ShowSteps",
+      "TopRightText",
       "HeartRate",
       "BezelLabel",
-      "RightBox",
-      "ShowBattery",
-      "ShowSteps",
-      "TopLeftText",
-      "TopRightText",
-      "Inverted"
+      "CaseColor",
+      "Inverted",
+      "Ghosts",
+      "BacklightColor",
+      "BacklightCustom",
+      "VibeDisconnect",
+      "VibeConnect"
     ],
     "resources": {
       "media": [

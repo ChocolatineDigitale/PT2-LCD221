@@ -10,7 +10,7 @@ var VIBE_PATTERNS = [
 ];
 
 module.exports = [
-  { "type": "heading", "defaultValue": "PT2 W-221H" },
+  { "type": "heading", "defaultValue": "LCD 221" },
   {
     "type": "section",
     "items": [
@@ -99,10 +99,10 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Appearance" },
       {
-        "type": "select", "messageKey": "Theme", "label": "Case color", "defaultValue": "classic",
+        "type": "select", "messageKey": "CaseColor", "label": "Case color", "defaultValue": "black",
         "options": [
-          { "label": "Black", "value": "classic" },
-          { "label": "Silver", "value": "light" }
+          { "label": "Black", "value": "black" },
+          { "label": "Silver", "value": "silver" }
         ]
       },
       {
@@ -129,8 +129,13 @@ module.exports = [
           { "label": "Cyan", "value": "00E0FF" },
           { "label": "Blue", "value": "2060FF" },
           { "label": "Purple", "value": "A040FF" },
-          { "label": "Pink", "value": "FF40A0" }
+          { "label": "Pink", "value": "FF40A0" },
+          { "label": "Custom color...", "value": "custom" }
         ]
+      },
+      {
+        "type": "color", "messageKey": "BacklightCustom", "label": "Custom color", "defaultValue": "ffaa00",
+        "description": "The backlight LED may look a bit different from the swatch."
       }
     ]
   },

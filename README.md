@@ -18,7 +18,7 @@ Version 1.2.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and 
 |---|---|
 | Top bezel | Battery level and step count, or your own text instead of either (settings) |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
-| Indicator box | **BT** phone connected, **ALM** an audible hourly chime is set and Quiet Time is off, **24H** 24-hour format, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
+| Indicator box | **BT** phone connected, **CHG** charging (it becomes **FULL** once the battery is full and the watch is still on the charger), **SIG** an audible hourly chime is set and Quiet Time is off, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
 | Time | Large 7-segment digits (slanted by default). A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD |
 | Right box | Temperature (°C or °F) or seconds |

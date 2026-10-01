@@ -678,7 +678,10 @@ static bool use_fahrenheit(void) {
 // The stored temperature (tenths of a degree Celsius) in the unit shown, rounded.
 static int display_temp(void) {
   int t10 = s_weather.temp;
-  if (use_fahrenheit()) t10 = t10 * 9 / 5 + 320;
+  if (use_fahrenheit()) {
+    int f50 = t10 * 9 + 1600;  // fiftieths of a degree Fahrenheit, rounded only once below
+    return (f50 + (f50 >= 0 ? 25 : -25)) / 50;
+  }
   return (t10 + (t10 >= 0 ? 5 : -5)) / 10;
 }
 
@@ -856,27 +859,30 @@ static void draw_bottom_bezel(GContext *ctx) {
 // The indicator box's labels: lit (ink) when active, faint otherwise. Each is
 // fitted to LABEL_H rows and centred vertically in its cell (the cells are the
 // rows between the 2px frame and the middle divider); "BT" is also widened. The
-// ALM and 24H cells stop 1px short of the rounded corners that intrude.
-// ALM lights up while a sound (not just a vibration) is set as the hourly chime and Quiet
-// Time is off. Quiet Time mutes the speaker, so the chime is off for its duration; the
-// setting itself is untouched, so ALM comes back when Quiet Time ends.
+// CHG and SIG cells stop 1px short of the rounded corners that intrude.
+// SIG lights up while a sound (not just a vibration) is set as the hourly chime and the
+// speaker is not muted. Quiet Time mutes the speaker, so the chime is off for its duration;
+// the setting itself is untouched, so SIG comes back when Quiet Time ends.
 static bool chime_is_audible(void) {
   const uint8_t c = s_settings.chime;
   const bool sound =
       c == CHIME_LCD_CLASSIC || c == CHIME_DOORBELL || c == CHIME_BIG_BEN || c == CHIME_SUPER;
-  return sound && !quiet_time_is_active();
+  // The speaker is also muted for good in the watch's sound settings, not only in Quiet Time.
+  return sound && !quiet_time_is_active() && !speaker_is_muted();
 }
 
 static void draw_indicator_labels(GContext *ctx) {
   const int top_h = BOX_MID - BOX_TOP - 2, bottom_h = BOX_BOTTOM - BOX_MID - 2;
   const int left_w = BOX_DIV - BOX_LEFT, right_w = BOX_RIGHT - BOX_DIV;
   static const int8_t BT_WIDTHS[] = { 8, 9 };  // widened B and T
+  // On the charger but no longer charging: the battery is full.
+  const bool full = s_battery.is_plugged && !s_battery.is_charging;
   struct { const char *label; bool on; GRect cell; const int8_t *letter_w; } ind[] = {
     { "BT",   s_connected,
       GRect(BOX_LEFT + 4, BOX_TOP + 2, left_w - 4, top_h), BT_WIDTHS },
-    { "ALM",  chime_is_audible(),
+    { full ? "FULL" : "CHG", s_battery.is_charging || full,
       GRect(BOX_DIV + 1, BOX_TOP + 2, right_w - 4, top_h), NULL },
-    { "24H",  is_24h(),
+    { "SIG",  chime_is_audible(),
       GRect(BOX_LEFT + 4, BOX_MID + 1, left_w - 4, bottom_h), NULL },
     { "MUTE", quiet_time_is_active(),
       GRect(BOX_DIV + 1, BOX_MID + 1, right_w - 2, bottom_h), NULL },
@@ -1103,6 +1109,14 @@ static bool parse_hex(const char *hex, uint32_t *rgb) {
 static void copy_upper(char *dst, size_t size, const char *src) {
   strncpy(dst, src, size - 1);
   dst[size - 1] = '\0';
+  // The cut is in bytes but the settings page counts characters: if it landed inside a
+  // multi-byte UTF-8 character, drop that whole character so the string stays valid.
+  size_t len = strlen(dst);
+  if (strlen(src) > len) {
+    while (len > 0 && ((unsigned char)dst[len - 1] & 0xC0) == 0x80) len--;  // continuation bytes
+    if (len > 0 && ((unsigned char)dst[len - 1] & 0xC0) == 0xC0) len--;  // their lead byte
+    dst[len] = '\0';
+  }
   for (char *c = dst; *c; c++) {
     if (*c >= 'a' && *c <= 'z') *c -= 'a' - 'A';
   }

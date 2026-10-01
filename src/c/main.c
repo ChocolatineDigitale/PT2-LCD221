@@ -857,10 +857,14 @@ static void draw_bottom_bezel(GContext *ctx) {
 // fitted to LABEL_H rows and centred vertically in its cell (the cells are the
 // rows between the 2px frame and the middle divider); "BT" is also widened. The
 // ALM and 24H cells stop 1px short of the rounded corners that intrude.
-// ALM lights up while a sound (not just a vibration) is set as the hourly chime.
+// ALM lights up while a sound (not just a vibration) is set as the hourly chime and Quiet
+// Time is off. Quiet Time mutes the speaker, so the chime is off for its duration; the
+// setting itself is untouched, so ALM comes back when Quiet Time ends.
 static bool chime_is_audible(void) {
   const uint8_t c = s_settings.chime;
-  return c == CHIME_LCD_CLASSIC || c == CHIME_DOORBELL || c == CHIME_BIG_BEN || c == CHIME_SUPER;
+  const bool sound =
+      c == CHIME_LCD_CLASSIC || c == CHIME_DOORBELL || c == CHIME_BIG_BEN || c == CHIME_SUPER;
+  return sound && !quiet_time_is_active();
 }
 
 static void draw_indicator_labels(GContext *ctx) {

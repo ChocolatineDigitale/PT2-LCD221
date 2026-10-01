@@ -1,2 +1,2 @@
-New: the ALM indicator lights up when an audible hourly chime is set (it replaces the charging indicator).
+New: the ALM indicator lights up when an audible hourly chime is set and Quiet Time is off (it replaces the charging indicator).
 New: time format and temperature unit can follow your watch's own settings, and that is now the default. You can still pick 12/24-hour and Celsius/Fahrenheit yourself.

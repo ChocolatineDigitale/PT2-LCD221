@@ -25,8 +25,10 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Time & date" },
       {
-        "type": "select", "messageKey": "TimeFormat", "label": "Time format", "defaultValue": "24",
+        "type": "select", "messageKey": "TimeFormat", "label": "Time format", "defaultValue": "auto",
+        "description": "Follow watch uses the 12/24-hour setting of your watch.",
         "options": [
+          { "label": "Follow watch", "value": "auto" },
           { "label": "24-hour", "value": "24" },
           { "label": "12-hour", "value": "12" }
         ]
@@ -55,8 +57,10 @@ module.exports = [
       },
       {
         "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
-        "defaultValue": "C",
+        "defaultValue": "auto",
+        "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",
         "options": [
+          { "label": "Follow watch", "value": "auto" },
           { "label": "Celsius", "value": "C" },
           { "label": "Fahrenheit", "value": "F" }
         ]

@@ -9,12 +9,12 @@ What to enter in the Rebble Developer Portal (dev-portal.rebble.io) for LCD 221:
 | Title | LCD 221 |
 | Description | `description.txt` (under 1600 characters) |
 | Screenshots (Pebble Time 2) | `screenshots/1-default.png`, `2-inverted.png`, `3-seconds.png`, in that order |
-| Release | `LCD221-1.1.0.pbw` (made with `python3 tools/strip_pbw.py`) |
+| Release | `LCD221-1.2.0.pbw` (made with `python3 tools/strip_pbw.py`) |
 | Release notes | `release-notes.txt` |
 | Support email | a throwaway address, not the account email |
 | Source code URL, website | leave blank if the portal allows it |
 | Category | the closest digital / retro one |
 | Marketing banner | optional, skip |
 
-`LCD221-1.1.0.pbw` is a copy of `build/release.pbw`; rebuild it with `pebble build` then
+`LCD221-1.2.0.pbw` is a copy of `build/release.pbw`; rebuild it with `pebble build` then
 `python3 tools/strip_pbw.py --deny <your real names>` and copy it here after every change.

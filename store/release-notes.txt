@@ -1,3 +1,2 @@
-New: optional hourly chime (LCD Classic, Doorbell, Big Ben, Super, or vibration) with adjustable volume, a Quiet Time option and a Play chime button to preview it.
-A clearer P for PM in 12-hour mode.
-Reset to defaults moved to the top of the settings page and now needs two taps.
+New: the ALM indicator lights up when an audible hourly chime is set (it replaces the charging indicator).
+New: time format and temperature unit can follow your watch's own settings, and that is now the default. You can still pick 12/24-hour and Celsius/Fahrenheit yourself.

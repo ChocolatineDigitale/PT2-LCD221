@@ -30,8 +30,8 @@
 // smoothing: their edges are vertical and horizontal, so plain pixels are sharper.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 16  // bumped whenever Settings changes layout
-#define WEATHER_KEY 4  // bumped whenever Weather changes layout
+#define SETTINGS_KEY 17  // bumped whenever Settings changes layout
+#define WEATHER_KEY 5  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
 
@@ -53,14 +53,19 @@ typedef enum {
   CHIME_COUNT
 } ChimeChoice;
 
+// Time format and temperature unit: follow the watch, or force one.
+enum { FORMAT_AUTO = 0, FORMAT_24H = 1, FORMAT_12H = 2 };
+enum { UNIT_AUTO = 0, UNIT_C = 1, UNIT_F = 2 };
+
 // Everything the settings page controls, grouped and ordered like the page itself
 // (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
 typedef struct {
   // Time & date
-  bool twelve_hour;
+  uint8_t time_format;         // FORMAT_AUTO follows the watch's 12/24-hour setting
   bool day_first;
   // Right box
   bool show_seconds;           // seconds instead of the temperature (redraws every second)
+  uint8_t temp_unit;           // UNIT_AUTO follows the watch's measurement system
   // Top bezel
   bool show_battery;           // top-left: battery level, else top_left
   char top_left[20];           // top-left text when the battery level is off, upper-cased
@@ -85,7 +90,7 @@ typedef struct {
 } Settings;
 
 typedef struct {
-  int16_t temp;
+  int16_t temp;                // tenths of a degree Celsius
   time_t updated;
 } Weather;
 
@@ -654,7 +659,28 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
   graphics_release_frame_buffer(ctx, fb);
 }
 
-static bool is_24h(void) { return !s_settings.twelve_hour; }
+static bool is_24h(void) {
+  if (s_settings.time_format == FORMAT_AUTO) return clock_is_24h_style();
+  return s_settings.time_format == FORMAT_24H;
+}
+
+// Imperial measurement system (chosen on the watch) means Fahrenheit when following it.
+static bool use_fahrenheit(void) {
+  if (s_settings.temp_unit != UNIT_AUTO) return s_settings.temp_unit == UNIT_F;
+#if defined(PBL_HEALTH)
+  return health_service_get_measurement_system_for_display(HealthMetricWalkedDistanceMeters) ==
+         MeasurementSystemImperial;
+#else
+  return false;
+#endif
+}
+
+// The stored temperature (tenths of a degree Celsius) in the unit shown, rounded.
+static int display_temp(void) {
+  int t10 = s_weather.temp;
+  if (use_fahrenheit()) t10 = t10 * 9 / 5 + 320;
+  return (t10 + (t10 >= 0 ? 5 : -5)) / 10;
+}
 
 // The indicator box's outline. Like the W-221H, the top-right and bottom-left
 // corners are rounded (radius BOX_RADIUS); the outer frame is 2px, the inner
@@ -742,7 +768,7 @@ static void draw_seconds(void) {
 // while there is no recent weather.
 static void draw_temperature(void) {
   const int dy = ROW3_Y, dh = ROW3_H;
-  int temp = s_weather.temp, v = abs(temp);
+  int temp = display_temp(), v = abs(temp);
   bool valid = weather_valid();
   bool neg = valid && temp < 0, hundred = valid && v >= 100;
   // The minus is the font's middle bar in a narrow box; the "1" is the right
@@ -830,7 +856,13 @@ static void draw_bottom_bezel(GContext *ctx) {
 // The indicator box's labels: lit (ink) when active, faint otherwise. Each is
 // fitted to LABEL_H rows and centred vertically in its cell (the cells are the
 // rows between the 2px frame and the middle divider); "BT" is also widened. The
-// CHG and 24H cells stop 1px short of the rounded corners that intrude.
+// ALM and 24H cells stop 1px short of the rounded corners that intrude.
+// ALM lights up while a sound (not just a vibration) is set as the hourly chime.
+static bool chime_is_audible(void) {
+  const uint8_t c = s_settings.chime;
+  return c == CHIME_LCD_CLASSIC || c == CHIME_DOORBELL || c == CHIME_BIG_BEN || c == CHIME_SUPER;
+}
+
 static void draw_indicator_labels(GContext *ctx) {
   const int top_h = BOX_MID - BOX_TOP - 2, bottom_h = BOX_BOTTOM - BOX_MID - 2;
   const int left_w = BOX_DIV - BOX_LEFT, right_w = BOX_RIGHT - BOX_DIV;
@@ -838,7 +870,7 @@ static void draw_indicator_labels(GContext *ctx) {
   struct { const char *label; bool on; GRect cell; const int8_t *letter_w; } ind[] = {
     { "BT",   s_connected,
       GRect(BOX_LEFT + 4, BOX_TOP + 2, left_w - 4, top_h), BT_WIDTHS },
-    { "CHG",  s_battery.is_charging,
+    { "ALM",  chime_is_audible(),
       GRect(BOX_DIV + 1, BOX_TOP + 2, right_w - 4, top_h), NULL },
     { "24H",  is_24h(),
       GRect(BOX_LEFT + 4, BOX_MID + 1, left_w - 4, bottom_h), NULL },
@@ -1089,7 +1121,8 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   }
   // Time & date
   if ((t = dict_find(iter, MESSAGE_KEY_TimeFormat))) {
-    s_settings.twelve_hour = strcmp(t->value->cstring, "12") == 0;
+    const char *f = t->value->cstring;
+    s_settings.time_format = strcmp(f, "12") == 0 ? FORMAT_12H : strcmp(f, "24") == 0 ? FORMAT_24H : FORMAT_AUTO;
     settings_changed = true;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_DateFormat))) {
@@ -1099,6 +1132,11 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   // Right box
   if ((t = dict_find(iter, MESSAGE_KEY_RightBox))) {
     s_settings.show_seconds = strcmp(t->value->cstring, "seconds") == 0;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_TempUnit))) {
+    const char *u = t->value->cstring;
+    s_settings.temp_unit = strcmp(u, "C") == 0 ? UNIT_C : strcmp(u, "F") == 0 ? UNIT_F : UNIT_AUTO;
     settings_changed = true;
   }
   // Top bezel

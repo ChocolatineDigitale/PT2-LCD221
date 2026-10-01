@@ -315,17 +315,17 @@ static const char *day_glyph(char ch) {
   }
 }
 
-// The "P" (PM) marker: a solid, square 11x14 LCD symbol like the W-221H's, with a
-// rectangular hole and square corners.
+// The "P" (PM) marker: an 11x14 LCD symbol with a square-ish bowl (corners cut by a dot)
+// and a straight stem.
 static const char PM_BITS[] =
+  "#########.."
   "###########"
+  "###.....###"
+  "###.....###"
+  "###.....###"
+  "###.....###"
   "###########"
-  "###....####"
-  "###....####"
-  "###....####"
-  "###########"
-  "###########"
-  "###########"
+  "#########.."
   "###........"
   "###........"
   "###........"

@@ -10,7 +10,7 @@ Inverted colors, and seconds instead of the temperature:
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 
-Version 1.0.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
+Version 1.1.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
 
@@ -35,7 +35,7 @@ Notes:
 ## Settings
 
 Open the watch face's settings in the Pebble app. Nothing reaches the watch until you tap **Save**.
-**Reset to defaults** puts every option back to the value below (then tap Save).
+**Reset to defaults** (at the top of the page; tap it twice, so a stray tap does nothing) puts every option back to the value below (then tap Save).
 
 | Group | Option | Choices (default first) |
 |---|---|---|
@@ -56,8 +56,12 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, **Custom color...** (shows the app's own color picker, the watch's 64 colors) |
 | Alerts | Vibrate on phone disconnect | Double pulse (None, Short, Long, Double, Triple, Heartbeat, SOS) |
 | | Vibrate on phone reconnect | Short pulse (same patterns) |
+| | Hourly chime | Off, LCD Classic (two 4096 Hz beeps, like a digital watch's hourly signal), Doorbell, Big Ben (the first bar of the full-hour Westminster chime), Super (the first bar of a well-known video-game theme), Vibration only. Played at the top of the hour while the watch face is showing; choosing a sound plays it once when you save |
+| | Respect Quiet Time | On. When off, the chime is replaced by a vibration during Quiet Time, because the watch mutes its speaker then (only shown while a chime is chosen) |
+| | Chime volume | 70. 5 to 100 in steps of 5 (shown while a sound is chosen) |
+| | Play chime | A button (shown while a chime is chosen) that plays the chosen chime once when you tap Save, so you can hear it |
 
-There is no vibration during Quiet Time. When the two top-bezel texts are both long, the right
+There is no vibration during Quiet Time (except the hourly chime when "Respect Quiet Time" is off). When the two top-bezel texts are both long, the right
 text takes the width it needs and the left one is cut with "..." to fit.
 
 ## Building and installing
@@ -203,6 +207,8 @@ comparing them pixel by pixel.
 
 - The digit shapes are the segment outlines of the **7-Segment** font by **Jan Bobrowski**
   (<https://torinak.com/font/7-segment>), SIL Open Font License 1.1.
+- This watch face was made with the help of **Claude**, an AI assistant from Anthropic, which wrote and tested
+  much of the code. The design and the decisions are the author's.
 - The settings page uses **pebble-clay** (MIT). Weather data is from **Open-Meteo** (CC BY 4.0).
 - Casio and W-221H are trademarks of Casio Computer Co., Ltd.; this watch face is an unofficial
   tribute and is not affiliated with Casio or Pebble.

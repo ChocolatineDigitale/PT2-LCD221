@@ -14,6 +14,15 @@ module.exports = [
   {
     "type": "section",
     "items": [
+      {
+        "type": "button", "id": "resetDefaults", "defaultValue": "Reset to defaults",
+        "description": "Tap twice to put every setting back to its default, then tap Save at the bottom to apply."
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
       { "type": "heading", "defaultValue": "Time & date" },
       {
         "type": "select", "messageKey": "TimeFormat", "label": "Time format", "defaultValue": "24",
@@ -157,16 +166,32 @@ module.exports = [
         "defaultValue": "1",
         "description": "No vibration during Quiet Time.",
         "options": VIBE_PATTERNS
-      }
-    ]
-  },
-  {
-    "type": "section",
-    "items": [
+      },
       {
-        "type": "button", "id": "resetDefaults", "defaultValue": "Reset to defaults",
-        "description": "Restores every setting above. Tap Save to apply."
-      }
+        "type": "select", "messageKey": "HourlyChime", "label": "Hourly chime", "defaultValue": "0",
+        "description": "Played at the top of the hour while this watch face is showing. Choosing a sound plays it once when you save.",
+        "options": [
+          { "label": "Off", "value": "0" },
+          { "label": "LCD Classic", "value": "1" },
+          { "label": "Doorbell", "value": "2" },
+          { "label": "Big Ben", "value": "5" },
+          { "label": "Super", "value": "6" },
+          { "label": "Vibration only", "value": "4" }
+        ]
+      },
+      {
+        "type": "toggle", "messageKey": "ChimeQuiet", "label": "Respect Quiet Time", "defaultValue": true,
+        "description": "No chime during Quiet Time. When off, the chime is replaced by a vibration then, because the watch mutes its speaker during Quiet Time."
+      },
+      {
+        "type": "slider", "messageKey": "ChimeVolume", "label": "Chime volume", "defaultValue": 70,
+        "min": 5, "max": 100, "step": 5
+      },
+      {
+        "type": "button", "id": "playChime", "defaultValue": "Play chime",
+        "description": "Plays the chosen chime once when you tap Save, so you can hear it. The watch's own mute still applies."
+      },
+      { "type": "toggle", "messageKey": "ChimeTest", "label": "Play chime on save", "defaultValue": false }
     ]
   },
   { "type": "submit", "defaultValue": "Save" }

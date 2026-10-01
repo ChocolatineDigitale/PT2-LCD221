@@ -30,10 +30,12 @@
 // smoothing: their edges are vertical and horizontal, so plain pixels are sharper.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 15  // bumped whenever Settings changes layout
+#define SETTINGS_KEY 16  // bumped whenever Settings changes layout
 #define WEATHER_KEY 4  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
+
+#define CHIME_VOLUME_DEFAULT 70  // 0-100
 
 #define BACKLIGHT_SYSTEM 0xFFFFFFFFu  // the user's normal backlight colour
 #define BACKLIGHT_CUSTOM 0xFFFFFFFEu  // use backlight_custom
@@ -42,6 +44,14 @@
 typedef enum {
   VIBE_NONE, VIBE_SHORT, VIBE_LONG, VIBE_DOUBLE, VIBE_TRIPLE, VIBE_HEARTBEAT, VIBE_SOS, VIBE_COUNT
 } VibeChoice;
+
+// Hourly chime choices; the values are what the settings page sends.
+typedef enum {
+  CHIME_OFF = 0, CHIME_LCD_CLASSIC = 1, CHIME_DOORBELL = 2,
+  // 3 was retired; the values stay as they were so saved settings keep their meaning
+  CHIME_VIBE = 4, CHIME_BIG_BEN = 5, CHIME_SUPER = 6,
+  CHIME_COUNT
+} ChimeChoice;
 
 // Everything the settings page controls, grouped and ordered like the page itself
 // (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
@@ -69,6 +79,9 @@ typedef struct {
   // Alerts
   uint8_t vibe_disconnect;     // VibeChoice played when the phone disconnects
   uint8_t vibe_connect;        // VibeChoice played when it reconnects
+  uint8_t chime;               // ChimeChoice played on the hour
+  bool chime_quiet;            // stay silent during Quiet Time
+  uint8_t chime_volume;        // 0-100
 } Settings;
 
 typedef struct {
@@ -878,6 +891,7 @@ static void request_weather(void) {
 }
 
 static void tick_handler(struct tm *now, TimeUnits changed);
+static void play_chime(bool preview);
 
 // Once a minute normally; every second when the seconds are shown.
 static void subscribe_ticks(void) {
@@ -892,6 +906,7 @@ static void tick_handler(struct tm *now, TimeUnits changed) {
     if (now->tm_min % WEATHER_REFRESH_MIN == 0) request_weather();
   }
   layer_mark_dirty(s_canvas);
+  if (now->tm_min == 0 && now->tm_sec == 0) play_chime(false);
 }
 
 static void battery_handler(BatteryChargeState state) {
@@ -918,6 +933,92 @@ static void play_vibe(uint8_t pattern) {
       break;
     case VIBE_SOS:
       vibes_enqueue_custom_pattern((VibePattern){ .durations = SOS, .num_segments = ARRAY_LENGTH(SOS) });
+      break;
+    default: break;
+  }
+}
+
+#define LCD_BEEP_HZ 4096
+#define LCD_BEEP_MS 120
+
+static void lcd_second_beep(void *context) {
+  speaker_play_tone(LCD_BEEP_HZ, LCD_BEEP_MS + 10, s_settings.chime_volume, SpeakerWaveformSquare);
+}
+
+// Tunes are built into one buffer that stays valid while the speaker plays it.
+#define TUNE_MAX 160
+static SpeakerNote s_tune[TUNE_MAX];
+static uint32_t s_tune_len;
+
+static void tune_add(uint8_t midi, uint16_t ms, SpeakerWaveform wave) {
+  if (s_tune_len < TUNE_MAX) {
+    s_tune[s_tune_len++] = (SpeakerNote){ .midi_note = midi, .waveform = wave, .duration_ms = ms };
+  }
+}
+
+// Big Ben: the first bar of the Westminster Quarters' full-hour chime, three 550 ms notes and
+// a 1100 ms one in the key of E major (E4 G#4 F#4 B3).
+static void build_big_ben(void) {
+  static const uint8_t BAR[4] = { 64, 68, 66, 59 };
+  s_tune_len = 0;
+  for (int n = 0; n < 4; n++) tune_add(BAR[n], n == 3 ? 1100 : 550, SpeakerWaveformSine);
+}
+
+// The first bar of a well-known platform-game theme, up to the high G (midi note, length in
+// 85 ms steps; 0 = rest).
+static void build_super(void) {
+  static const uint8_t TUNE[][2] = {
+    { 76, 1 }, { 76, 1 }, { 0, 1 }, { 76, 1 }, { 0, 1 }, { 72, 1 }, { 76, 1 }, { 0, 1 },
+    { 79, 2 },
+  };
+  s_tune_len = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(TUNE); i++) {
+    uint16_t ms = TUNE[i][1] * 85;
+    if (TUNE[i][0] == 0) {
+      tune_add(0, ms, SpeakerWaveformSquare);
+    } else {
+      tune_add(TUNE[i][0], ms - 12, SpeakerWaveformSquare);  // a short gap so repeats stay separate
+      tune_add(0, 12, SpeakerWaveformSquare);
+    }
+  }
+}
+
+// The hourly chime. The watch mutes its speaker during Quiet Time and apps can't override
+// that, so when the chime is allowed then, it is replaced by a vibration. `preview` plays
+// it once when the choice is saved, whatever the time or Quiet Time.
+static void play_chime(bool preview) {
+  static const SpeakerNote BELL[] = {
+    { 76, SpeakerWaveformSine, 500, 0, 0 }, { 72, SpeakerWaveformSine, 900, 0, 0 },
+  };
+  const uint8_t choice = s_settings.chime;
+  if (choice == CHIME_OFF || choice == 3 || choice >= CHIME_COUNT) return;
+  const bool quiet = quiet_time_is_active();
+  if (quiet && s_settings.chime_quiet && !preview) return;
+  if (choice == CHIME_VIBE) {
+    vibes_double_pulse();
+    return;
+  }
+  if (speaker_is_muted()) {
+    if (quiet && !s_settings.chime_quiet) vibes_double_pulse();  // the speaker is muted for Quiet Time
+    return;
+  }
+  switch (choice) {
+    case CHIME_LCD_CLASSIC:
+      // Two flat 4096 Hz beeps, 120 ms long with a 120 ms gap, as measured from a recording
+      // of a digital watch hourly signal. The notes API only has semitone steps, so the second beep
+      // is scheduled with a timer to keep the exact frequency.
+      if (speaker_play_tone(LCD_BEEP_HZ, LCD_BEEP_MS, s_settings.chime_volume, SpeakerWaveformSquare)) {
+        app_timer_register(2 * LCD_BEEP_MS, lcd_second_beep, NULL);
+      }
+      break;
+    case CHIME_DOORBELL:  speaker_play_notes(BELL, ARRAY_LENGTH(BELL), s_settings.chime_volume); break;
+    case CHIME_BIG_BEN:
+      build_big_ben();
+      speaker_play_notes(s_tune, s_tune_len, s_settings.chime_volume);
+      break;
+    case CHIME_SUPER:
+      build_super();
+      speaker_play_notes(s_tune, s_tune_len, s_settings.chime_volume);
       break;
     default: break;
   }
@@ -979,6 +1080,7 @@ static int tuple_int(Tuple *t) {
 static void inbox_handler(DictionaryIterator *iter, void *context) {
   Tuple *t;
   bool settings_changed = false;
+  bool play_preview = false;
 
   if ((t = dict_find(iter, MESSAGE_KEY_Temp))) {
     s_weather.temp = tuple_int(t);
@@ -1066,12 +1168,33 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     s_settings.vibe_connect = (v >= 0 && v < VIBE_COUNT) ? v : VIBE_NONE;
     settings_changed = true;
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_HourlyChime))) {
+    int v = tuple_int(t);
+    uint8_t chime = (v >= 0 && v < CHIME_COUNT && v != 3) ? v : CHIME_OFF;
+    play_preview = chime != CHIME_OFF && chime != s_settings.chime;
+    s_settings.chime = chime;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ChimeQuiet))) {
+    s_settings.chime_quiet = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ChimeVolume))) {
+    int v = tuple_int(t);
+    s_settings.chime_volume = v < 0 ? 0 : v > 100 ? 100 : v;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ChimeTest)) && tuple_int(t)) {
+    play_preview = true;  // asked for with the settings page's "Play chime" button
+    settings_changed = true;
+  }
 
   if (settings_changed) {
     persist_write_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
     apply_theme();
     apply_backlight();
     subscribe_ticks();
+    if (play_preview) play_chime(true);
   }
   layer_mark_dirty(s_canvas);
 }
@@ -1103,6 +1226,8 @@ static void init(void) {
     .backlight = BACKLIGHT_SYSTEM,
     .vibe_disconnect = VIBE_DOUBLE,
     .vibe_connect = VIBE_SHORT,
+    .chime_quiet = true,
+    .chime_volume = CHIME_VOLUME_DEFAULT,
   };
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
   persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));

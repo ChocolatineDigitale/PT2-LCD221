@@ -1,7 +1,7 @@
 {
   "name": "lcd-221",
   "author": "Kicou",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "keywords": ["pebble-app"],
   "private": true,
   "license": "MIT",
@@ -38,7 +38,11 @@
       "BacklightColor",
       "BacklightCustom",
       "VibeDisconnect",
-      "VibeConnect"
+      "VibeConnect",
+      "HourlyChime",
+      "ChimeQuiet",
+      "ChimeVolume",
+      "ChimeTest"
     ],
     "resources": {
       "media": [

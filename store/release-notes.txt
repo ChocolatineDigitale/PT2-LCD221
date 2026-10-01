@@ -1,4 +1,3 @@
 New: optional hourly chime (LCD Classic, Doorbell, Big Ben, Super, or vibration) with adjustable volume, a Quiet Time option and a Play chime button to preview it.
-New: Slanted digits setting; straight digits are sharper and evenly sized.
-Larger, wider time digits, smaller date, and a clearer P for PM.
+A clearer P for PM in 12-hour mode.
 Reset to defaults moved to the top of the settings page and now needs two taps.

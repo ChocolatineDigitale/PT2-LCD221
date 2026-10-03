@@ -18,7 +18,7 @@
 //   lifecycle          init / deinit
 //
 // Settings arrive from the phone (src/pkjs/config.js) as app messages and are
-// persisted; bump SETTINGS_KEY whenever the Settings struct changes.
+// persisted; bump SETTINGS_KEY whenever the layout of existing Settings fields changes.
 
 #include <pebble.h>
 #include "segments.h"
@@ -30,10 +30,13 @@
 // smoothing: their edges are vertical and horizontal, so plain pixels are sharper.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 17  // bumped whenever Settings changes layout
+#define SETTINGS_KEY 17  // bumped whenever existing Settings fields change layout (new fields may use free padding)
 #define WEATHER_KEY 5  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
+#define SECONDS_BURST_DEFAULT_S 30  // how long the seconds tick after a shake (setting: 5..120)
+#define SECONDS_BURST_MIN_S 5
+#define SECONDS_BURST_MAX_S 120
 
 #define CHIME_VOLUME_DEFAULT 70  // 0-100
 
@@ -64,7 +67,7 @@ typedef struct {
   uint8_t time_format;         // FORMAT_AUTO follows the watch's 12/24-hour setting
   bool day_first;
   // Right box
-  bool show_seconds;           // seconds instead of the temperature (redraws every second)
+  bool show_seconds;           // seconds instead of the temperature (always, or after a shake: see below)
   uint8_t temp_unit;           // UNIT_AUTO follows the watch's measurement system
   // Top bezel
   bool show_battery;           // top-left: battery level, else top_left
@@ -87,6 +90,10 @@ typedef struct {
   uint8_t chime;               // ChimeChoice played on the hour
   bool chime_quiet;            // stay silent during Quiet Time
   uint8_t chime_volume;        // 0-100
+  // Added after the groups above, at the end, so settings saved by earlier versions still load.
+  // (They sit in what used to be padding, so the struct keeps its size; init() sanitises them.)
+  uint8_t seconds_on_shake;    // 1: seconds tick only for a while after a wrist shake
+  uint8_t seconds_burst_s;     // how many seconds they tick for
 } Settings;
 
 typedef struct {
@@ -100,6 +107,10 @@ static GBitmap *s_fb;
 
 static Settings s_settings;
 static Weather s_weather;
+static time_t s_weather_saved;       // when s_weather was last written to persistent storage
+static bool s_focus = true;          // the face is the app in front (not covered by a system window)
+static bool s_quiet, s_muted;        // Quiet Time / speaker mute, read once per redraw
+static time_t s_burst_until;         // seconds_on_shake: the seconds show until this time (0 = idle)
 static struct tm s_now;
 static BatteryChargeState s_battery;
 static bool s_connected;
@@ -172,11 +183,6 @@ static const uint8_t DIGIT_SEGS[] = {
 
 static int floor_div(int32_t a, int32_t b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
 
-// Fills a polygon given in 0..1000 coordinates, scaled into the box (x, y, w, h).
-// A pixel is filled when its centre is inside (even-odd rule).
-// `slant` leans the shape right like italics, in thousandths of the height:
-// each row is shifted by its height above the bottom times slant/1000, with
-// sub-pixel precision so edges stay clean diagonals.
 // Upright digits: maps a 0..1000 coordinate to whole pixels so that every bar of a digit
 // has the same thickness (plain scaling gives bars of 8 and 9 pixels side by side).
 // `knots` are the bar edges in font units and `px` where they land, in pixels.
@@ -204,6 +210,25 @@ static void snap_poly(int w, int h, const int16_t *pts, int n, int16_t *out) {
   }
 }
 
+// Fills a polygon given in 0..1000 coordinates, scaled into the box (x, y, w, h).
+// A pixel is filled when its centre is inside (even-odd rule).
+// `slant` leans the shape right like italics, in thousandths of the height:
+// each row is shifted by its height above the bottom times slant/1000, with
+// sub-pixel precision so edges stay clean diagonals.
+// The rows (0..h-1) a polygon given in 0..1000 coordinates can touch, with a row of margin:
+// segments cover only 12-48% of a digit's height, so most rows need no scanning at all.
+static void poly_rows(const int16_t *pts, int n, int h, int *first, int *last) {
+  int lo = 1000, hi = 0;
+  for (int i = 0; i < n; i++) {
+    if (pts[2 * i + 1] < lo) lo = pts[2 * i + 1];
+    if (pts[2 * i + 1] > hi) hi = pts[2 * i + 1];
+  }
+  *first = lo * h / 1000 - 1;
+  if (*first < 0) *first = 0;
+  *last = hi * h / 1000 + 1;
+  if (*last > h - 1) *last = h - 1;
+}
+
 static void fill_poly(int x, int y, int w, int h, const int16_t *pts, int n, int slant, GColor c,
                       bool dither) {
   int16_t snapped[16];
@@ -211,7 +236,9 @@ static void fill_poly(int x, int y, int w, int h, const int16_t *pts, int n, int
     snap_poly(w, h, pts, n, snapped);
     pts = snapped;
   }
-  for (int r = 0; r < h; r++) {
+  int first, last;
+  poly_rows(pts, n, h, &first, &last);
+  for (int r = first; r <= last; r++) {
     int32_t shift = (int32_t)(2 * (h - r) - 1) * slant;  // row shift, in 1/2000 px
     int32_t yn = (int32_t)(2 * r + 1) * 1000 / (2 * h);
     int32_t xs[8];
@@ -245,8 +272,10 @@ static void fill_poly_aa(int x, int y, int w, int h, const int16_t *pts, int n, 
   int32_t cov[AA_MAX_W];
   int cols = w + h * slant / 1000 + 2;
   if (cols > AA_MAX_W) cols = AA_MAX_W;
-  for (int r = 0; r < h; r++) {
-    memset(cov, 0, sizeof(cov));
+  int first, last;
+  poly_rows(pts, n, h, &first, &last);
+  for (int r = first; r <= last; r++) {
+    memset(cov, 0, sizeof(cov[0]) * cols);
     for (int k = 0; k < AA_SUB; k++) {
       // Sub-row centre in 0..1000 shape units, and its slant shift in 1/1000 px.
       int32_t yn = (int32_t)(2 * AA_SUB * r + 2 * k + 1) * 1000 / (2 * AA_SUB * h);
@@ -483,6 +512,10 @@ static void apply_backlight(void) {
 #define PM_DY -2  // and how many rows it sits above the top of the digits
 
 // Row 3: date (left) and seconds / temperature (right), under a 2px rule.
+#define DST_X 4         // DST label cell, top left of the date cell
+#define DST_Y 157
+#define DST_W 34
+#define DST_H 12
 #define ROW3_LINE_Y 154
 #define ROW3_DIV_X 110  // vertical divider between the date and the right box
 #define ROW3_Y 160      // top of the right box's digits
@@ -521,9 +554,13 @@ static void draw_bezel_text(GContext *ctx, const char *text, int x, int y, int w
 //    (NULL = keep the width), with 2px letter gaps and stems kept at 2px;
 //  - drawn with the ordered dither at `density` (out of DENSITY_FULL).
 // The result is centred in `cell`; only the cell's interior is touched.
-#define FIT_MAX_W 64
-#define FIT_MAX_H 16
+#define FIT_MAX_W 40  // the widest indicator cell is 39 px,
+#define FIT_MAX_H 12  // and every cell is 12 rows tall
 #define FIT_MAX_LETTERS 8
+_Static_assert(BOX_RIGHT - BOX_DIV - 2 <= FIT_MAX_W && BOX_DIV - BOX_LEFT - 4 <= FIT_MAX_W &&
+               DST_W <= FIT_MAX_W, "an indicator cell is wider than the label scratch buffer");
+_Static_assert(BOX_MID - BOX_TOP - 2 <= FIT_MAX_H && BOX_BOTTOM - BOX_MID - 2 <= FIT_MAX_H &&
+               DST_H <= FIT_MAX_H, "an indicator cell is taller than the label scratch buffer");
 #define BAR_RUN 4  // a horizontal run of this many ink pixels makes a row part of a bar
 
 typedef uint8_t FitRows[FIT_MAX_H][FIT_MAX_W];
@@ -562,7 +599,7 @@ static int row_to_drop(const FitRows buf, const int *rows, int n, int x0, int x1
 }
 
 static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const int8_t *letter_w,
-                             int height, GColor color, int density) {
+                             int letter_w_n, int height, GColor color, int density) {
   // Gothic 18 bold capitals start 7px below the text box's top.
   GRect box = GRect(cell.origin.x - 1, cell.origin.y - 7, cell.size.w + 2, 22);
   draw_text(ctx, text, box, GTextAlignmentCenter, color);
@@ -625,7 +662,7 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
     // stretch it, with stems trimmed back to the bold font's 2px (bars by 1px).
     int tw = len, gap = 0;
     if (letter_w) {
-      tw = letter_w[letter] > len ? letter_w[letter] : len;
+      tw = (letter < letter_w_n && letter_w[letter] > len) ? letter_w[letter] : len;
       gap = kept > 0 ? 2 : 0;
     } else if (kept > 0) {
       gap = start - prev_end - 1;
@@ -802,6 +839,21 @@ static void draw_temperature(void) {
   draw_dots(TEMP_X + 180 + (dh - 4) * s_slant / 1000, dy, DEGREE_BITS, 7, 7, 1, 1, true);
 }
 
+// A shake's burst of seconds is running. It also ends if the clock was set back meanwhile, so
+// it can never last longer than seconds_burst_s.
+static bool burst_active(void) {
+  if (s_burst_until == 0) return false;
+  const time_t now = time(NULL);
+  return now < s_burst_until && s_burst_until - now <= s_settings.seconds_burst_s;
+}
+
+// Seconds in the right box: always, or (seconds_on_shake) only during a burst after a wrist
+// shake, with the temperature there the rest of the time.
+static bool seconds_showing(void) {
+  if (!s_settings.show_seconds) return false;
+  return !s_settings.seconds_on_shake || burst_active();
+}
+
 // Everything on the white LCD panel, drawn straight into the framebuffer.
 static void draw_lcd(void) {
   draw_day(WEEKDAY_X, WEEKDAY_Y, DAYS[s_now.tm_wday]);
@@ -810,7 +862,7 @@ static void draw_lcd(void) {
   fill(LCD_X, ROW3_LINE_Y, LCD_W, 2, s_ink, false);
   fill(ROW3_DIV_X, ROW3_LINE_Y, 2, LCD_Y + LCD_H - ROW3_LINE_Y, s_ink, false);
   draw_date();
-  if (s_settings.show_seconds) draw_seconds();
+  if (seconds_showing()) draw_seconds();
   else draw_temperature();
 }
 
@@ -856,10 +908,6 @@ static void draw_bottom_bezel(GContext *ctx) {
   draw_bezel_text(ctx, s_settings.bezel_label, 82, BOTTOM_CAP, 108, GTextAlignmentRight);
 }
 
-// The indicator box's labels: lit (ink) when active, faint otherwise. Each is
-// fitted to LABEL_H rows and centred vertically in its cell (the cells are the
-// rows between the 2px frame and the middle divider); "BT" is also widened. The
-// CHG and SIG cells stop 1px short of the rounded corners that intrude.
 // SIG lights up while a sound (not just a vibration) is set as the hourly chime and the
 // speaker is not muted. Quiet Time mutes the speaker, so the chime is off for its duration;
 // the setting itself is untouched, so SIG comes back when Quiet Time ends.
@@ -868,30 +916,43 @@ static bool chime_is_audible(void) {
   const bool sound =
       c == CHIME_LCD_CLASSIC || c == CHIME_DOORBELL || c == CHIME_BIG_BEN || c == CHIME_SUPER;
   // The speaker is also muted for good in the watch's sound settings, not only in Quiet Time.
-  return sound && !quiet_time_is_active() && !speaker_is_muted();
+  return sound && !s_quiet && !s_muted;
 }
 
+// The indicator box's labels: lit (ink) when active, faint otherwise. Each is
+// fitted to LABEL_H rows and centred vertically in its cell (the cells are the
+// rows between the 2px frame and the middle divider); "BT" is also widened. The
+// CHG and SIG cells stop 1px short of the rounded corners that intrude.
 static void draw_indicator_labels(GContext *ctx) {
   const int top_h = BOX_MID - BOX_TOP - 2, bottom_h = BOX_BOTTOM - BOX_MID - 2;
   const int left_w = BOX_DIV - BOX_LEFT, right_w = BOX_RIGHT - BOX_DIV;
   static const int8_t BT_WIDTHS[] = { 8, 9 };  // widened B and T
   // On the charger but no longer charging: the battery is full.
   const bool full = s_battery.is_plugged && !s_battery.is_charging;
-  struct { const char *label; bool on; GRect cell; const int8_t *letter_w; } ind[] = {
+  struct { const char *label; bool on; GRect cell; const int8_t *letter_w; int letter_w_n; } ind[] = {
     { "BT",   s_connected,
-      GRect(BOX_LEFT + 4, BOX_TOP + 2, left_w - 4, top_h), BT_WIDTHS },
+      GRect(BOX_LEFT + 4, BOX_TOP + 2, left_w - 4, top_h), BT_WIDTHS, ARRAY_LENGTH(BT_WIDTHS) },
     { full ? "FULL" : "CHG", s_battery.is_charging || full,
-      GRect(BOX_DIV + 1, BOX_TOP + 2, right_w - 4, top_h), NULL },
+      GRect(BOX_DIV + 1, BOX_TOP + 2, right_w - 4, top_h), NULL, 0 },
     { "SIG",  chime_is_audible(),
-      GRect(BOX_LEFT + 4, BOX_MID + 1, left_w - 4, bottom_h), NULL },
-    { "MUTE", quiet_time_is_active(),
-      GRect(BOX_DIV + 1, BOX_MID + 1, right_w - 2, bottom_h), NULL },
+      GRect(BOX_LEFT + 4, BOX_MID + 1, left_w - 4, bottom_h), NULL, 0 },
+    { "MUTE", s_quiet,
+      GRect(BOX_DIV + 1, BOX_MID + 1, right_w - 2, bottom_h), NULL, 0 },
   };
   for (unsigned i = 0; i < ARRAY_LENGTH(ind); i++) {
     if (!ind[i].on && !s_settings.ghosts) continue;
-    draw_fitted_text(ctx, ind[i].label, ind[i].cell, ind[i].letter_w, LABEL_H,
+    draw_fitted_text(ctx, ind[i].label, ind[i].cell, ind[i].letter_w, ind[i].letter_w_n, LABEL_H,
                      ind[i].on ? s_ink : s_ghost, ind[i].on ? DENSITY_FULL : s_label_off_density);
   }
+}
+
+// DST: top left of the date cell, lit while daylight saving time is in effect in the watch's
+// time zone (the phone provides the zone; the watch's own clock knows when DST applies).
+static void draw_dst_label(GContext *ctx) {
+  const bool on = s_now.tm_isdst > 0;
+  if (!on && !s_settings.ghosts) return;
+  draw_fitted_text(ctx, "DST", GRect(DST_X, DST_Y, DST_W, DST_H), NULL, 0, LABEL_H,
+                   on ? s_ink : s_ghost, on ? DENSITY_FULL : s_label_off_density);
 }
 
 static void canvas_update(Layer *layer, GContext *ctx) {
@@ -909,6 +970,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     graphics_fill_rect(ctx, GRect(LCD_X, LCD_Y + LCD_H, LCD_W, 1), 0, GCornerNone);
   }
 
+  s_quiet = quiet_time_is_active();
+  s_muted = speaker_is_muted();
   s_fb = graphics_capture_frame_buffer(ctx);
   if (!s_fb) return;
   draw_lcd();
@@ -920,6 +983,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   draw_top_bezel(ctx);
   draw_bottom_bezel(ctx);
   draw_indicator_labels(ctx);
+  draw_dst_label(ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -932,20 +996,70 @@ static void request_weather(void) {
   app_message_outbox_send();
 }
 
+// Asks the phone for weather only when it would be shown and used: the temperature is on
+// screen (not the seconds), the phone is connected, and the last reading is not recent.
+// Each request wakes the phone app for a location fix and a web request.
+static void refresh_weather_if_needed(void) {
+  // The temperature is on screen unless the seconds are always shown.
+  if ((s_settings.show_seconds && !s_settings.seconds_on_shake) || !s_connected) return;
+  if (s_weather.updated != 0 && time(NULL) - s_weather.updated < (WEATHER_REFRESH_MIN - 5) * 60) return;
+  request_weather();
+}
+
 static void tick_handler(struct tm *now, TimeUnits changed);
 static void play_chime(bool preview);
 
-// Once a minute normally; every second when the seconds are shown.
+// Once a minute normally (plus the hour, so a whole-hour time zone change redraws at once);
+// every second only while the seconds are shown AND the face is in front.
 static void subscribe_ticks(void) {
   tick_timer_service_unsubscribe();
-  tick_timer_service_subscribe(s_settings.show_seconds ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
+  const bool per_second = seconds_showing() && s_focus;
+  tick_timer_service_subscribe(per_second ? SECOND_UNIT : (MINUTE_UNIT | HOUR_UNIT), tick_handler);
+}
+
+// A wrist shake: start (or extend) the burst of ticking seconds.
+static void start_seconds_burst(void) {
+  if (!s_focus || !s_settings.show_seconds || !s_settings.seconds_on_shake) return;
+  s_burst_until = time(NULL) + s_settings.seconds_burst_s;
+  subscribe_ticks();
+  time_t now = time(NULL);
+  s_now = *localtime(&now);
+  layer_mark_dirty(s_canvas);
+}
+
+static void shake_handler(AccelAxisType axis, int32_t direction) { start_seconds_burst(); }
+
+// The accelerometer's shake detection (the SDK calls it the "tap" service) is only listened to
+// while the setting needs it.
+static void update_shake_subscription(void) {
+  accel_tap_service_unsubscribe();
+  if (s_settings.show_seconds && s_settings.seconds_on_shake) {
+    accel_tap_service_subscribe(shake_handler);
+  } else {
+    s_burst_until = 0;
+  }
+}
+
+// A notification or menu covering the face makes per-second redraws pointless.
+static void focus_handler(bool in_focus) {
+  s_focus = in_focus;
+  subscribe_ticks();
+  if (in_focus) {
+    time_t now = time(NULL);
+    s_now = *localtime(&now);
+    layer_mark_dirty(s_canvas);
+  }
 }
 
 static void tick_handler(struct tm *now, TimeUnits changed) {
   s_now = *now;
+  if (s_burst_until != 0 && !burst_active()) {
+    s_burst_until = 0;      // the burst is over: back to a tick a minute and the temperature
+    subscribe_ticks();
+  }
   if (changed & MINUTE_UNIT) {
-    update_steps();
-    if (now->tm_min % WEATHER_REFRESH_MIN == 0) request_weather();
+    if (s_settings.show_steps) update_steps();
+    if (now->tm_min % WEATHER_REFRESH_MIN == 0) refresh_weather_if_needed();
   }
   layer_mark_dirty(s_canvas);
   if (now->tm_min == 0 && now->tm_sec == 0) play_chime(false);
@@ -988,7 +1102,7 @@ static void lcd_second_beep(void *context) {
 }
 
 // Tunes are built into one buffer that stays valid while the speaker plays it.
-#define TUNE_MAX 160
+#define TUNE_MAX 24  // the longest tune needs 15 notes
 static SpeakerNote s_tune[TUNE_MAX];
 static uint32_t s_tune_len;
 
@@ -1070,21 +1184,33 @@ static void connection_handler(bool connected) {
   if (connected != s_connected && !quiet_time_is_active()) {
     play_vibe(connected ? s_settings.vibe_connect : s_settings.vibe_disconnect);
   }
+  const bool changed = connected != s_connected;
   s_connected = connected;
+  if (!changed) return;  // nothing visible changes
   layer_mark_dirty(s_canvas);
+  if (connected) refresh_weather_if_needed();
 }
 
 #if defined(PBL_HEALTH)
 static void health_handler(HealthEventType event, void *context) {
-  if (event == HealthEventMovementUpdate || event == HealthEventSignificantUpdate) {
-    update_steps();
-    layer_mark_dirty(s_canvas);
-  } else if (event == HealthEventHeartRateUpdate) {
-    update_heart_rate();
-    if (s_settings.heart_rate) layer_mark_dirty(s_canvas);
-  }
+  if (event != HealthEventHeartRateUpdate) return;
+  const int before = s_hr;
+  update_heart_rate();
+  if (s_hr != before) layer_mark_dirty(s_canvas);
 }
 #endif
+
+// Health events wake the app, so they are only listened to while the heart rate is shown. (The
+// step count is read on the minute tick, which redraws the face anyway.)
+static void update_health_subscription(void) {
+#if defined(PBL_HEALTH)
+  health_service_events_unsubscribe();
+  if (s_settings.heart_rate) {
+    update_heart_rate();
+    health_service_events_subscribe(health_handler, NULL);
+  }
+#endif
+}
 
 // Reads a preset colour such as "FFA020" into *rgb. Returns false, leaving *rgb
 // alone, unless it is exactly six hex digits.
@@ -1133,9 +1259,17 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   bool play_preview = false;
 
   if ((t = dict_find(iter, MESSAGE_KEY_Temp))) {
-    s_weather.temp = tuple_int(t);
-    s_weather.updated = time(NULL);
-    persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+    const int16_t temp = (int16_t)tuple_int(t);
+    const time_t now = time(NULL);
+    const bool changed = temp != s_weather.temp;
+    s_weather.temp = temp;
+    s_weather.updated = now;
+    // Flash writes cost energy: save when the value changed, otherwise about hourly (the
+    // saved timestamp only has to be good enough for the 3 hour "too old" limit).
+    if (changed || now - s_weather_saved >= 60 * 60) {
+      persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+      s_weather_saved = now;
+    }
   }
   // Time & date
   if ((t = dict_find(iter, MESSAGE_KEY_TimeFormat))) {
@@ -1150,6 +1284,16 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   // Right box
   if ((t = dict_find(iter, MESSAGE_KEY_RightBox))) {
     s_settings.show_seconds = strcmp(t->value->cstring, "seconds") == 0;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_SecondsMode))) {
+    s_settings.seconds_on_shake = strcmp(t->value->cstring, "shake") == 0 ? 1 : 0;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_SecondsDuration))) {
+    int v = tuple_int(t);
+    s_settings.seconds_burst_s = v < SECONDS_BURST_MIN_S ? SECONDS_BURST_MIN_S
+        : v > SECONDS_BURST_MAX_S ? SECONDS_BURST_MAX_S : v;
     settings_changed = true;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_TempUnit))) {
@@ -1249,7 +1393,11 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     persist_write_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
     apply_theme();
     apply_backlight();
+    update_shake_subscription();
+    update_health_subscription();
     subscribe_ticks();
+    if (s_settings.show_steps) update_steps();
+    refresh_weather_if_needed();
     if (play_preview) play_chime(true);
   }
   layer_mark_dirty(s_canvas);
@@ -1284,8 +1432,14 @@ static void init(void) {
     .vibe_connect = VIBE_SHORT,
     .chime_quiet = true,
     .chime_volume = CHIME_VOLUME_DEFAULT,
+    .seconds_burst_s = SECONDS_BURST_DEFAULT_S,
   };
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+  // Old saves left padding where these two now live.
+  if (s_settings.seconds_on_shake > 1) s_settings.seconds_on_shake = 0;
+  if (s_settings.seconds_burst_s < SECONDS_BURST_MIN_S || s_settings.seconds_burst_s > SECONDS_BURST_MAX_S) {
+    s_settings.seconds_burst_s = SECONDS_BURST_DEFAULT_S;
+  }
   persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
   apply_theme();
   apply_backlight();
@@ -1295,29 +1449,31 @@ static void init(void) {
   s_battery = battery_state_service_peek();
   s_connected = connection_service_peek_pebble_app_connection();
   update_steps();
-  update_heart_rate();
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload });
   window_stack_push(s_window, true);
 
+  update_shake_subscription();
   subscribe_ticks();
   battery_state_service_subscribe(battery_handler);
+  app_focus_service_subscribe(focus_handler);
   connection_service_subscribe(
       (ConnectionHandlers){ .pebble_app_connection_handler = connection_handler });
-#if defined(PBL_HEALTH)
-  health_service_events_subscribe(health_handler, NULL);
-#endif
+  update_health_subscription();
 
   app_message_register_inbox_received(inbox_handler);
   // The inbox must hold a full settings Save: about 230 bytes with plain text and
   // over 400 with emoji in the three custom texts.
-  app_message_open(512, 64);
+  // The outbox only ever carries the one-byte weather request.
+  app_message_open(512, dict_calc_buffer_size(1, sizeof(uint8_t)));
 }
 
 static void deinit(void) {
   tick_timer_service_unsubscribe();
   battery_state_service_unsubscribe();
+  app_focus_service_unsubscribe();
+  accel_tap_service_unsubscribe();
   connection_service_unsubscribe();
 #if defined(PBL_HEALTH)
   health_service_events_unsubscribe();

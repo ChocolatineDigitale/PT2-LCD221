@@ -1,7 +1,7 @@
 A Pebble Time 2 watch face that recreates the look of the Casio W-221H digital watch: a crisp LCD with slanted 7-segment digits, faint "unlit" segments like a real display, a dot-matrix weekday and a small BT / CHG / SIG / MUTE indicator box, all between a top and a bottom bezel.
 
 WHAT IT SHOWS
-- Time (12 or 24 hour, with the PM marker), weekday, and date (DD-MM or MM-DD)
+- Time (12 or 24 hour, with the PM marker), weekday, and date (DD-MM or MM-DD) with a DST indicator
 - Right box: the temperature (C or F, or follow your watch) or the seconds
 - Top bezel: battery level and step count, or your own text instead of either
 - Bottom bezel: a WR badge, or HR and your latest heart rate, plus a text label of your choice

@@ -56,6 +56,19 @@ module.exports = [
         ]
       },
       {
+        "type": "select", "messageKey": "SecondsMode", "label": "Seconds ticking", "defaultValue": "always",
+        "description": "Shake your wrist to start the seconds. When they are not ticking, the right box shows the temperature.",
+        "options": [
+          { "label": "Always", "value": "always" },
+          { "label": "After a wrist shake", "value": "shake" }
+        ]
+      },
+      {
+        "type": "slider", "messageKey": "SecondsDuration", "label": "Seconds duration (s)", "defaultValue": 30,
+        "min": 5, "max": 120, "step": 5,
+        "description": "How long the seconds keep ticking after a shake."
+      },
+      {
         "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
         "defaultValue": "auto",
         "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",

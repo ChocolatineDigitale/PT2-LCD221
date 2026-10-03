@@ -1,2 +1,3 @@
-New: the SIG indicator lights up when an audible hourly chime is set and Quiet Time is off. The indicator box is now BT, CHG, SIG and MUTE; the 24H indicator is gone, since the time shows which format is in use.
-New: time format and temperature unit can follow your watch's own settings, and that is now the default. You can still pick 12/24-hour and Celsius/Fahrenheit yourself.
+New: DST label above the date, lit while daylight saving time is in effect.
+New: "Seconds ticking" option: the seconds can tick only for a chosen time (5 to 120 s, default 30) after a wrist shake, with the temperature shown the rest of the time. The default is still to tick all the time.
+Lower battery and memory use: the seconds stop ticking while a notification covers the face, weather is only requested when it is needed, and health events are only used for the heart rate.

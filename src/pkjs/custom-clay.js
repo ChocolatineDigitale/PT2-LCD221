@@ -15,11 +15,19 @@ module.exports = function () {
       sync();
     });
 
-    // The temperature unit only matters while the right box shows the temperature.
-    var rightBox = item('RightBox'), unit = item('TempUnit');
-    function syncUnit() { if (rightBox.get() === 'temperature') unit.show(); else unit.hide(); }
-    rightBox.on('change', syncUnit);
-    syncUnit();
+    // The seconds mode only matters while the right box shows the seconds; the temperature
+    // unit while the temperature is shown, which includes the idle time of "after a shake".
+    var rightBox = item('RightBox'), secondsMode = item('SecondsMode'), unit = item('TempUnit');
+    var duration = item('SecondsDuration');
+    function syncRightBox() {
+      var seconds = rightBox.get() === 'seconds';
+      if (seconds) secondsMode.show(); else secondsMode.hide();
+      if (seconds && secondsMode.get() === 'shake') duration.show(); else duration.hide();
+      if (!seconds || secondsMode.get() === 'shake') unit.show(); else unit.hide();
+    }
+    rightBox.on('change', syncRightBox);
+    secondsMode.on('change', syncRightBox);
+    syncRightBox();
 
     // The colour picker only matters while "Custom color..." is the backlight choice.
     var backlight = item('BacklightColor'), custom = item('BacklightCustom');

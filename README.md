@@ -6,11 +6,11 @@ box, between a black top bezel and bottom bezel.
 
 ![LCD 221](docs/watchface.png)
 
-Inverted colors, and seconds instead of the temperature:
+Inverted colors, and 24-hour time with seconds instead of the temperature:
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 
-Version 1.2.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
+Version 1.2.1. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
 
@@ -18,9 +18,9 @@ Version 1.2.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and 
 |---|---|
 | Top bezel | Battery level and step count, or your own text instead of either (settings) |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
-| Indicator box | **BT** phone connected, **CHG** charging (it becomes **FULL** once the battery is full and the watch is still on the charger), **SIG** an audible hourly chime is set and Quiet Time is off, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
+| Indicator box | **BT** phone connected, **CHG** charging (it becomes **FULL** once the battery is full and the watch is still on the charger), **SIG** an audible hourly chime is set, Quiet Time is off and the watch's speaker is not muted, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
 | Time | Large 7-segment digits (slanted by default). A **P** lights up for PM in 12-hour mode |
-| Date | DD-MM or MM-DD |
+| Date | DD-MM or MM-DD. A **DST** label above it lights while daylight saving time is in effect in your time zone |
 | Right box | Temperature (°C or °F) or seconds |
 | Bottom bezel | A **WR** badge (or **HR** and your latest heart rate) and a text label |
 
@@ -28,7 +28,7 @@ Notes:
 
 - Battery is reported by the watch in 10% steps, so it moves 100%, 90%, 80%, ...
 - Steps come from Pebble Health. Heart rate is the latest reading the watch has; it shows `--` when there is none.
-- Weather is fetched by the phone from [Open-Meteo](https://open-meteo.com) using its location, at start-up and every 30 minutes. It shows `--` if the data is more than 3 hours old.
+- Weather is fetched by the phone from [Open-Meteo](https://open-meteo.com) using its location, at start-up and about every 30 minutes. To save battery, the watch only asks while the temperature can be on screen (not with seconds always on), the phone is connected and the last reading is older than 25 minutes, and the phone app waits at least 5 minutes between fetches (25 minutes when the face is merely opened again). It shows `--` if the data is more than 3 hours old.
 - Unlit segments are drawn as a faint ghost, like a real LCD (can be switched off).
 - The Time 2's backlight is colour-capable. By default the watch face leaves it at your normal system colour, but it can tint it instead (amber like the original's LED, one of ten presets, or any of the 64 colours in the app's picker).
 
@@ -42,7 +42,9 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | Time & date | Time format | **Follow watch** (its 12/24-hour setting), 24-hour, 12-hour |
 | | Date format | DD-MM, MM-DD |
 | Right box | Right box shows | Temperature, Seconds (redraws every second: uses more battery) |
-| | Temperature unit | **Follow watch** (Fahrenheit when the watch uses imperial units, otherwise Celsius), Celsius, Fahrenheit (only shown while the right box shows the temperature) |
+| | Seconds ticking | **Always** (every second, the default), or after a wrist shake. Shown only while the right box shows seconds; the right box shows the temperature the rest of the time |
+| | Seconds duration | 30 s. 5 to 120 in steps of 5: how long the seconds tick after a shake (shown only for "After a wrist shake") |
+| | Temperature unit | **Follow watch** (Fahrenheit when the watch uses imperial units, otherwise Celsius), Celsius, Fahrenheit (shown while the temperature can be on screen) |
 | Top bezel | Show battery level | On. When off, the left text is shown instead |
 | | Left text | `30 DAY BATT` (up to 19 characters, capitals; only shown while the battery level is off) |
 | | Show step count | On. When off, the right text is shown instead |
@@ -159,13 +161,13 @@ vibrations, the backlight colours, live heart rate, and every control on the set
   each with its own ghost and label shades. The case colour is independent of the theme.
 
 **Layout.** All positions are constants in the "Drawing" section of `main.c` (`LCD_*`, `BOX_*`,
-`TIME_*`, `ROW3_*`, `TEMP_X`, `BOTTOM_CAP`). There is one function per screen area
+`TIME_*`, `ROW3_*`, `DST_*`, `TEMP_X`, `BOTTOM_CAP`). There is one function per screen area
 (`draw_time`, `draw_date`, `draw_temperature`, `draw_indicator_frame`, `draw_top_bezel`, ...).
 
 **Data flow.** The phone sends the temperature as the `Temp` message, in tenths of a degree Celsius (the watch converts it to the unit shown); the watch asks for a refresh
 with `RequestWeather`. Settings from the settings page arrive as messages named after the
 `messageKey`s in `config.js`, are copied into the `Settings` struct and saved with `persist_write_data`.
-Ticks come once a minute, or every second when seconds are shown.
+Ticks come once a minute, or every second when seconds are shown (always, or for a chosen time after a wrist shake) and the face is in front (a notification or menu covering it drops back to one a minute). The step count is read on each minute tick, and heart rate redraws the face only when the reading changes.
 
 ## Changing things
 

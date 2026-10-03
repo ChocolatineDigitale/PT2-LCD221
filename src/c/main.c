@@ -59,6 +59,8 @@ typedef enum {
 // Time format and temperature unit: follow the watch, or force one.
 enum { FORMAT_AUTO = 0, FORMAT_24H = 1, FORMAT_12H = 2 };
 enum { UNIT_AUTO = 0, UNIT_C = 1, UNIT_F = 2 };
+// Date padding: zeros, a blank for the first number only, or blanks for both numbers.
+enum { PAD_ZERO = 0, PAD_FIRST_BLANK = 1, PAD_BOTH_BLANK = 2 };
 
 // Everything the settings page controls, grouped and ordered like the page itself
 // (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
@@ -94,6 +96,8 @@ typedef struct {
   // (They sit in what used to be padding, so the struct keeps its size; init() sanitises them.)
   uint8_t seconds_on_shake;    // 1: seconds tick only for a while after a wrist shake
   uint8_t seconds_burst_s;     // how many seconds they tick for
+  uint8_t hour_no_zero;        // 1: 24-hour time has no leading zero (7:05, like the original)
+  uint8_t date_pad;            // single-digit date numbers: PAD_ZERO (06-05), PAD_FIRST_BLANK ( 6-05), PAD_BOTH_BLANK ( 6- 5)
 } Settings;
 
 typedef struct {
@@ -763,7 +767,9 @@ static void draw_time(void) {
   // Digit boxes (left edges) and the colon, spread like the original's.
   static const int X[4] = { 6, 49, 108, 153 };
   const int colon_x = 93;
-  int tens = (is24 || hour >= 10) ? hour / 10 : DIGIT_BLANK;
+  // 12-hour: the first digit is blank or a 1 (the P sits where a 0 would be). 24-hour: the
+  // leading zero is optional.
+  int tens = (hour >= 10 || (is24 && !s_settings.hour_no_zero)) ? hour / 10 : DIGIT_BLANK;
   if (is24) {
     draw_digit(X[0], ty, tw, th, tens);
   } else {
@@ -790,10 +796,12 @@ static void draw_date(void) {
   int second = s_settings.day_first ? s_now.tm_mon + 1 : s_now.tm_mday;
   const int w = 15, h = 26;
   const int y = ROW3_Y + ROW3_H - h;  // bottom aligned with the right box's digits
-  draw_digit(19, y, w, h, first >= 10 ? first / 10 : DIGIT_BLANK);
+  const bool blank_first = s_settings.date_pad != PAD_ZERO;
+  const bool blank_second = s_settings.date_pad == PAD_BOTH_BLANK;
+  draw_digit(19, y, w, h, (first >= 10 || !blank_first) ? first / 10 : DIGIT_BLANK);
   draw_digit(38, y, w, h, first % 10);
   draw_segments(56, y, 8, h, SEG_G, SEG_G);  // dash: the font's middle bar
-  draw_digit(67, y, w, h, second / 10);
+  draw_digit(67, y, w, h, (second >= 10 || !blank_second) ? second / 10 : DIGIT_BLANK);
   draw_digit(86, y, w, h, second % 10);
 }
 
@@ -1281,6 +1289,15 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     s_settings.day_first = strcmp(t->value->cstring, "DM") == 0;
     settings_changed = true;
   }
+  if ((t = dict_find(iter, MESSAGE_KEY_TimeZero))) {
+    s_settings.hour_no_zero = tuple_int(t) ? 0 : 1;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_DatePadding))) {
+    const char *p = t->value->cstring;
+    s_settings.date_pad = strcmp(p, "first") == 0 ? PAD_FIRST_BLANK : strcmp(p, "both") == 0 ? PAD_BOTH_BLANK : PAD_ZERO;
+    settings_changed = true;
+  }
   // Right box
   if ((t = dict_find(iter, MESSAGE_KEY_RightBox))) {
     s_settings.show_seconds = strcmp(t->value->cstring, "seconds") == 0;
@@ -1437,6 +1454,8 @@ static void init(void) {
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
   // Old saves left padding where these two now live.
   if (s_settings.seconds_on_shake > 1) s_settings.seconds_on_shake = 0;
+  if (s_settings.hour_no_zero > 1) s_settings.hour_no_zero = 0;
+  if (s_settings.date_pad > PAD_BOTH_BLANK) s_settings.date_pad = PAD_ZERO;
   if (s_settings.seconds_burst_s < SECONDS_BURST_MIN_S || s_settings.seconds_burst_s > SECONDS_BURST_MAX_S) {
     s_settings.seconds_burst_s = SECONDS_BURST_DEFAULT_S;
   }

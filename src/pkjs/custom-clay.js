@@ -15,6 +15,12 @@ module.exports = function () {
       sync();
     });
 
+    // The hour's leading zero only matters in the 24-hour format ("Follow watch" may be either).
+    var timeFormat = item('TimeFormat'), hourZero = item('TimeZero');
+    function syncHourZero() { if (timeFormat.get() === '12') hourZero.hide(); else hourZero.show(); }
+    timeFormat.on('change', syncHourZero);
+    syncHourZero();
+
     // The seconds mode only matters while the right box shows the seconds; the temperature
     // unit while the temperature is shown, which includes the idle time of "after a shake".
     var rightBox = item('RightBox'), secondsMode = item('SecondsMode'), unit = item('TempUnit');

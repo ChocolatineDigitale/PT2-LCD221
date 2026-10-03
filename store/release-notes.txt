@@ -1,3 +1,3 @@
-New: DST label above the date, lit while daylight saving time is in effect.
-New: "Seconds ticking" option: the seconds can tick only for a chosen time (5 to 120 s, default 30) after a wrist shake, with the temperature shown the rest of the time. The default is still to tick all the time.
-Lower battery and memory use: the seconds stop ticking while a notification covers the face, weather is only requested when it is needed, and health events are only used for the heart rate.
+New: "Leading zero in the hour" option: turn it off for 7:05 instead of 07:05 in 24-hour mode, like the original watch.
+New: "Single-digit dates" option: leading zeros (06-05, the default), a blank for the first number only ( 6-05), or blanks for both ( 6- 5).
+The settings in Time & date and Right box are now in a more logical order.

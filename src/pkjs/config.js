@@ -34,10 +34,23 @@ module.exports = [
         ]
       },
       {
+        "type": "toggle", "messageKey": "TimeZero", "label": "Leading zero in the hour", "defaultValue": true,
+        "description": "24-hour format only. Off shows 7:05 instead of 07:05, like the original watch."
+      },
+      {
         "type": "select", "messageKey": "DateFormat", "label": "Date format", "defaultValue": "DM",
         "options": [
           { "label": "DD-MM", "value": "DM" },
           { "label": "MM-DD", "value": "MD" }
+        ]
+      },
+      {
+        "type": "select", "messageKey": "DatePadding", "label": "Single-digit dates", "defaultValue": "zero",
+        "description": "How a month or day below 10 is shown. Blanks, like the original watch, look like 6- 5.",
+        "options": [
+          { "label": "Leading zeros (06-05)", "value": "zero" },
+          { "label": "Blank first number only ( 6-05)", "value": "first" },
+          { "label": "Blank both numbers ( 6- 5)", "value": "both" }
         ]
       }
     ]
@@ -56,6 +69,16 @@ module.exports = [
         ]
       },
       {
+        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
+        "defaultValue": "auto",
+        "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",
+        "options": [
+          { "label": "Follow watch", "value": "auto" },
+          { "label": "Celsius", "value": "C" },
+          { "label": "Fahrenheit", "value": "F" }
+        ]
+      },
+      {
         "type": "select", "messageKey": "SecondsMode", "label": "Seconds ticking", "defaultValue": "always",
         "description": "Shake your wrist to start the seconds. When they are not ticking, the right box shows the temperature.",
         "options": [
@@ -67,16 +90,6 @@ module.exports = [
         "type": "slider", "messageKey": "SecondsDuration", "label": "Seconds duration (s)", "defaultValue": 30,
         "min": 5, "max": 120, "step": 5,
         "description": "How long the seconds keep ticking after a shake."
-      },
-      {
-        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
-        "defaultValue": "auto",
-        "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",
-        "options": [
-          { "label": "Follow watch", "value": "auto" },
-          { "label": "Celsius", "value": "C" },
-          { "label": "Fahrenheit", "value": "F" }
-        ]
       }
     ]
   },

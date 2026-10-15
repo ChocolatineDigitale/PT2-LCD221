@@ -6,7 +6,7 @@ box, between a black top bezel and bottom bezel.
 
 ![LCD 221](docs/watchface.png)
 
-Inverted colors, and 24-hour time with seconds instead of the temperature:
+The red marks on the screen edges (where the watch's buttons are) are optional. Below: inverted colors with other bezel corners (a distance, an HR badge with the heart rate, and the step count with its icon), and 24-hour time with seconds instead of the temperature:
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 

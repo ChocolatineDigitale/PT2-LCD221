@@ -7,7 +7,20 @@
 var Clay = require('pebble-clay');
 var clayConfig = require('./config');
 var customClay = require('./custom-clay');
-var clay = new Clay(clayConfig, customClay);
+// The watch tells us its 12/24-hour style and measurement system (bit 0: 24-hour, bit 1:
+// imperial); the settings page uses them to preview "Follow watch". They are kept between runs
+// and handed to the page through Clay's userData, which is copied when the page opens.
+var PREFS_KEY = 'lcd221-watch-prefs';
+var clayOptions = { userData: {} };
+function usePrefs(bits) {
+  clayOptions.userData.clock24 = !!(bits & 1);
+  clayOptions.userData.imperial = !!(bits & 2);
+}
+try {
+  var savedPrefs = localStorage.getItem(PREFS_KEY);
+  if (savedPrefs !== null) usePrefs(parseInt(savedPrefs, 10) || 0);
+} catch (e) { /* storage unavailable */ }
+var clay = new Clay(clayConfig, customClay, clayOptions);
 
 var lastFetch = 0;                 // last attempt in this run of the phone-side code
 var MIN_FETCH_MS = 5 * 60 * 1000;  // never fetch more often than this (a fix and a web request cost battery)
@@ -57,8 +70,15 @@ function fetchWeather(minAgeMs) {
 
 // The watch face is opened often (after the menu, a notification...): only fetch if the last
 // reading is old. The watch keeps its own copy and asks again when it needs fresh data.
-Pebble.addEventListener('ready', function () { fetchWeather(MIN_LAUNCH_MS); });
+Pebble.addEventListener('ready', function () {
+  Pebble.sendAppMessage({ RequestPrefs: 1 });
+  fetchWeather(MIN_LAUNCH_MS);
+});
 
 Pebble.addEventListener('appmessage', function (e) {
   if (e.payload.RequestWeather) fetchWeather(0);
+  if (e.payload.WatchPrefs !== undefined) {
+    usePrefs(e.payload.WatchPrefs);
+    try { localStorage.setItem(PREFS_KEY, String(e.payload.WatchPrefs)); } catch (err) { /* ignore */ }
+  }
 });

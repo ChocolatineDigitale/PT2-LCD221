@@ -30,7 +30,7 @@
 // smoothing: their edges are vertical and horizontal, so plain pixels are sharper.
 #define LCD_SLANT 75
 #define LCD_AA true
-#define SETTINGS_KEY 17  // bumped whenever existing Settings fields change layout (new fields may use free padding)
+#define SETTINGS_KEY 18  // bumped whenever existing Settings fields change layout (new fields may use free padding)
 #define WEATHER_KEY 5  // bumped whenever Weather changes layout
 #define WEATHER_MAX_AGE (3 * 60 * 60)
 #define WEATHER_REFRESH_MIN 30
@@ -61,6 +61,14 @@ enum { FORMAT_AUTO = 0, FORMAT_24H = 1, FORMAT_12H = 2 };
 enum { UNIT_AUTO = 0, UNIT_C = 1, UNIT_F = 2 };
 // Date padding: zeros, a blank for the first number only, or blanks for both numbers.
 enum { PAD_ZERO = 0, PAD_FIRST_BLANK = 1, PAD_BOTH_BLANK = 2 };
+// What a corner of the top or bottom bezel shows. The names are what the settings page sends.
+enum { CORNER_NOTHING = 0, CORNER_BATTERY, CORNER_STEPS, CORNER_DISTANCE, CORNER_HEART_RATE,
+       CORNER_TEXT, CORNER_WR, CORNER_TYPES };
+static const char *const CORNER_NAMES[CORNER_TYPES] = {
+  "none", "battery", "steps", "distance", "hr", "text", "wr",
+};
+enum { SLOT_TOP_LEFT = 0, SLOT_TOP_RIGHT, SLOT_BOTTOM_LEFT, SLOT_BOTTOM_RIGHT, SLOTS };
+enum { DIST_AUTO = 0, DIST_KM = 1, DIST_MI = 2 };
 
 // Everything the settings page controls, grouped and ordered like the page itself
 // (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
@@ -71,14 +79,10 @@ typedef struct {
   // Right box
   bool show_seconds;           // seconds instead of the temperature (always, or after a shake: see below)
   uint8_t temp_unit;           // UNIT_AUTO follows the watch's measurement system
-  // Top bezel
-  bool show_battery;           // top-left: battery level, else top_left
-  char top_left[20];           // top-left text when the battery level is off, upper-cased
-  bool show_steps;             // top-right: step count, else top_right
-  char top_right[20];          // top-right text when the step count is off, upper-cased
-  // Bottom bezel
-  bool heart_rate;             // HR badge + latest BPM instead of the WR badge
-  char bezel_label[16];        // printed on the bottom bezel, upper-cased
+  // Top and bottom bezel: what each of the four corners shows
+  uint8_t corner[SLOTS];       // CORNER_*
+  char corner_text[SLOTS][20]; // the text of a CORNER_TEXT corner, upper-cased
+  uint8_t dist_unit;           // DIST_AUTO follows the watch's measurement system
   // Appearance
   bool silver;                 // silver case instead of black
   bool inverted;               // light digits on a dark LCD
@@ -98,6 +102,7 @@ typedef struct {
   uint8_t seconds_burst_s;     // how many seconds they tick for
   uint8_t hour_no_zero;        // 1: 24-hour time has no leading zero (7:05, like the original)
   uint8_t date_pad;            // single-digit date numbers: PAD_ZERO (06-05), PAD_FIRST_BLANK ( 6-05), PAD_BOTH_BLANK ( 6- 5)
+  uint8_t button_markers;       // 1: red marks along the LCD edges, where the watch's buttons are
 } Settings;
 
 typedef struct {
@@ -119,6 +124,7 @@ static struct tm s_now;
 static BatteryChargeState s_battery;
 static bool s_connected;
 static int s_steps = -1;
+static int s_distance_m = -1;  // metres walked today, -1 if unavailable
 static int s_hr = -1;  // latest heart rate in BPM, -1 if unavailable
 
 // Theme (see apply_theme). Normal: black ink on a white LCD. Inverted: white ink
@@ -446,6 +452,25 @@ static void update_steps(void) {
 #endif
 }
 
+static void update_distance(void) {
+#if defined(PBL_HEALTH)
+  time_t start = time_start_of_today();
+  time_t end = time(NULL);
+  HealthServiceAccessibilityMask mask =
+      health_service_metric_accessible(HealthMetricWalkedDistanceMeters, start, end);
+  s_distance_m = (mask & HealthServiceAccessibilityMaskAvailable)
+      ? (int)health_service_sum_today(HealthMetricWalkedDistanceMeters) : -1;
+#endif
+}
+
+// Whether any corner of the bezels shows this kind of data.
+static bool corner_used(int type) {
+  for (int i = 0; i < SLOTS; i++) {
+    if (s_settings.corner[i] == type) return true;
+  }
+  return false;
+}
+
 static void apply_theme(void) {
   bool inv = s_settings.inverted;
 
@@ -528,6 +553,9 @@ static void apply_backlight(void) {
 
 // Bezels.
 #define TOP_RIGHT_MAX 104  // widest the top-right bezel text may be
+#define BOTTOM_RIGHT_MAX 108  // widest the bottom-right bezel text may be
+#define WR_BADGE_W 30      // a badge (WR / HR)
+#define BADGE_GAP 4        // between a badge and the value beside it
 #define BOTTOM_CAP 208     // top of the bottom bezel's 14px capitals (centred in the bezel)
 
 static const char *const DAYS[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
@@ -705,15 +733,26 @@ static bool is_24h(void) {
   return s_settings.time_format == FORMAT_24H;
 }
 
-// Imperial measurement system (chosen on the watch) means Fahrenheit when following it.
-static bool use_fahrenheit(void) {
-  if (s_settings.temp_unit != UNIT_AUTO) return s_settings.temp_unit == UNIT_F;
+// The measurement system chosen on the watch.
+static bool watch_is_imperial(void) {
 #if defined(PBL_HEALTH)
   return health_service_get_measurement_system_for_display(HealthMetricWalkedDistanceMeters) ==
          MeasurementSystemImperial;
 #else
   return false;
 #endif
+}
+
+// Imperial units on the watch mean Fahrenheit when following it.
+static bool use_fahrenheit(void) {
+  if (s_settings.temp_unit != UNIT_AUTO) return s_settings.temp_unit == UNIT_F;
+  return watch_is_imperial();
+}
+
+// Miles rather than kilometres: forced by the setting, else when the watch uses imperial units.
+static bool use_miles(void) {
+  if (s_settings.dist_unit != DIST_AUTO) return s_settings.dist_unit == DIST_MI;
+  return watch_is_imperial();
 }
 
 // The stored temperature (tenths of a degree Celsius) in the unit shown, rounded.
@@ -863,7 +902,36 @@ static bool seconds_showing(void) {
 }
 
 // Everything on the white LCD panel, drawn straight into the framebuffer.
+// Button markers (optional): red bars along the LCD's edges, beside the watch's buttons (one on the
+// left, three on the right: opposite it, one lower in the middle, and one mirrored below that).
+// Each is 5 px wide and a little taller than the weekday, with its inner corners rounded; the upper
+// pair sits a little above the weekday's centre. The lowest one just reaches into the bottom bezel.
+#define MARKER_W 5
+#define MARKER_H 32         // a little over the weekday's 29 rows
+#define MARKER_UPPER_CY 44  // centre of the upper markers (the weekday's centre is 48.5)
+#define MARKER_MID_CY 117   // centre of the middle marker; the lowest one mirrors the upper one
+
+// One marker with its left edge at x. `inner_right`: its inside edge is the right one.
+static void draw_marker(int x, int cy, bool inner_right) {
+  const int top = cy - MARKER_H / 2;
+  for (int r = 0; r < MARKER_H; r++) {
+    // Rounded inside corners: the first and last rows lose 2 px on the inside, the next ones 1.
+    const int cut = (r == 0 || r == MARKER_H - 1) ? 2 : (r == 1 || r == MARKER_H - 2) ? 1 : 0;
+    const int w = MARKER_W - cut;
+    fill(inner_right ? x : x + MARKER_W - w, top + r, w, 1, GColorRed, false);
+  }
+}
+
+static void draw_button_markers(void) {
+  draw_marker(LCD_X, MARKER_UPPER_CY, true);
+  const int right_x = LCD_X + LCD_W - MARKER_W;
+  draw_marker(right_x, MARKER_UPPER_CY, false);
+  draw_marker(right_x, MARKER_MID_CY, false);
+  draw_marker(right_x, 2 * MARKER_MID_CY - MARKER_UPPER_CY, false);
+}
+
 static void draw_lcd(void) {
+  if (s_settings.button_markers) draw_button_markers();
   draw_day(WEEKDAY_X, WEEKDAY_Y, DAYS[s_now.tm_wday]);
   draw_indicator_frame();
   draw_time();
@@ -877,22 +945,55 @@ static void draw_lcd(void) {
 // Top bezel (smaller Gothic 18 bold font): the battery level and step count, or
 // the custom texts when those are switched off. The right text takes the width
 // it needs (up to TOP_RIGHT_MAX) and the left text gets the rest.
+// The letters of the badge a bottom corner shows ("WR", or "HR" for the heart rate), or NULL.
+static const char *corner_badge(int slot) {
+  if (s_settings.corner[slot] == CORNER_WR) return "WR";
+  if (s_settings.corner[slot] == CORNER_HEART_RATE && slot >= SLOT_BOTTOM_LEFT) return "HR";
+  return NULL;
+}
+
+// The text of a bezel corner: empty for nothing and for the WR badge (which is drawn); beside a
+// badge only the value is given (the heart rate's "HR" is the badge).
+static void corner_string(int slot, char *out, size_t size) {
+  out[0] = '\0';
+  switch (s_settings.corner[slot]) {
+    case CORNER_BATTERY:
+      snprintf(out, size, "BATT %d%%", s_battery.charge_percent);
+      break;
+    case CORNER_STEPS:
+      if (s_steps >= 1000) snprintf(out, size, "%d,%03d STEPS", s_steps / 1000, s_steps % 1000);
+      else if (s_steps >= 0) snprintf(out, size, "%d STEPS", s_steps);
+      else snprintf(out, size, "-- STEPS");
+      break;
+    case CORNER_DISTANCE: {
+      const bool miles = use_miles();
+      if (s_distance_m < 0) {
+        snprintf(out, size, miles ? "-- MI" : "-- KM");
+      } else {
+        const int tenths = miles ? (s_distance_m * 10 + 804) / 1609 : (s_distance_m + 50) / 100;
+        snprintf(out, size, "%d.%d %s", tenths / 10, tenths % 10, miles ? "MI" : "KM");
+      }
+      break;
+    }
+    case CORNER_HEART_RATE: {
+      const char *label = corner_badge(slot) ? "" : "HR ";
+      if (s_hr > 0) snprintf(out, size, "%s%d", label, s_hr);
+      else snprintf(out, size, "%s--", label);
+      break;
+    }
+    case CORNER_TEXT:
+      snprintf(out, size, "%s", s_settings.corner_text[slot]);
+      break;
+    default:
+      break;
+  }
+}
+
+// Top bezel: the right text gets the width it needs (up to TOP_RIGHT_MAX), the left one the rest.
 static void draw_top_bezel(GContext *ctx) {
   char left[24], right[24];
-  if (s_settings.show_battery) {
-    snprintf(left, sizeof(left), "BATT %d%%", s_battery.charge_percent);
-  } else {
-    snprintf(left, sizeof(left), "%s", s_settings.top_left);
-  }
-  if (!s_settings.show_steps) {
-    snprintf(right, sizeof(right), "%s", s_settings.top_right);
-  } else if (s_steps >= 1000) {
-    snprintf(right, sizeof(right), "%d,%03d STEPS", s_steps / 1000, s_steps % 1000);
-  } else if (s_steps >= 0) {
-    snprintf(right, sizeof(right), "%d STEPS", s_steps);
-  } else {
-    snprintf(right, sizeof(right), "-- STEPS");
-  }
+  corner_string(SLOT_TOP_LEFT, left, sizeof(left));
+  corner_string(SLOT_TOP_RIGHT, right, sizeof(right));
   int right_w = graphics_text_layout_get_content_size(
       right, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(0, 0, 190, 22),
       GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
@@ -901,19 +1002,45 @@ static void draw_top_bezel(GContext *ctx) {
   draw_text(ctx, left, GRect(10, -2, 190 - right_w - 14, 22), GTextAlignmentLeft, s_frame_text);
 }
 
-// Bottom bezel (larger text): the WR badge (or HR badge and heart rate) and the
-// custom label.
-static void draw_bottom_bezel(GContext *ctx) {
+// A badge: a small outlined box with two letters in it ("WR" water resistant, or "HR").
+static void draw_badge(GContext *ctx, int x, const char *letters) {
   graphics_context_set_stroke_color(ctx, s_frame_text);
-  graphics_draw_round_rect(ctx, GRect(10, BOTTOM_CAP - 3, 30, 20), 3);
-  draw_bezel_text(ctx, s_settings.heart_rate ? "HR" : "WR", 10, BOTTOM_CAP, 30, GTextAlignmentCenter);
-  if (s_settings.heart_rate) {
-    char hr_text[12];
-    if (s_hr > 0) snprintf(hr_text, sizeof(hr_text), "%d", s_hr);
-    else snprintf(hr_text, sizeof(hr_text), "--");
-    draw_bezel_text(ctx, hr_text, 44, BOTTOM_CAP, 36, GTextAlignmentLeft);
+  graphics_draw_round_rect(ctx, GRect(x, BOTTOM_CAP - 3, WR_BADGE_W, 20), 3);
+  draw_bezel_text(ctx, letters, x, BOTTOM_CAP, WR_BADGE_W, GTextAlignmentCenter);
+}
+
+// Bottom bezel: like the top one, with badges (the WR badge, or HR followed by the heart rate)
+// as possible corners.
+static void draw_bottom_bezel(GContext *ctx) {
+  const char *left_badge = corner_badge(SLOT_BOTTOM_LEFT);
+  const char *right_badge = corner_badge(SLOT_BOTTOM_RIGHT);
+  char left[24], right[24];
+  corner_string(SLOT_BOTTOM_LEFT, left, sizeof(left));
+  corner_string(SLOT_BOTTOM_RIGHT, right, sizeof(right));
+  const int text_w = graphics_text_layout_get_content_size(
+      right, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), GRect(0, 0, 190, 30),
+      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
+  int right_w = right_badge ? WR_BADGE_W + (right[0] ? BADGE_GAP + text_w : 0) : text_w;
+  if (right_w > BOTTOM_RIGHT_MAX) right_w = BOTTOM_RIGHT_MAX;
+  if (right_badge) {
+    const int x = 190 - right_w;  // the badge and its value, as one group against the right edge
+    draw_badge(ctx, x, right_badge);
+    if (right[0]) {
+      draw_bezel_text(ctx, right, x + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP,
+                      right_w - WR_BADGE_W - BADGE_GAP, GTextAlignmentLeft);
+    }
+  } else {
+    draw_bezel_text(ctx, right, 190 - right_w, BOTTOM_CAP, right_w, GTextAlignmentRight);
   }
-  draw_bezel_text(ctx, s_settings.bezel_label, 82, BOTTOM_CAP, 108, GTextAlignmentRight);
+  if (left_badge) {
+    draw_badge(ctx, 10, left_badge);
+    const int avail = 190 - right_w - 14 - WR_BADGE_W - BADGE_GAP;
+    if (left[0] && avail > 0) {
+      draw_bezel_text(ctx, left, 10 + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP, avail, GTextAlignmentLeft);
+    }
+  } else {
+    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, 190 - right_w - 14, GTextAlignmentLeft);
+  }
 }
 
 // SIG lights up while a sound (not just a vibration) is set as the hourly chime and the
@@ -1004,6 +1131,16 @@ static void request_weather(void) {
   app_message_outbox_send();
 }
 
+// Tells the phone which 12/24-hour style and measurement system the watch follows, so that the
+// settings page's preview can show what "Follow watch" means. Bit 0: 24-hour, bit 1: imperial.
+static void send_watch_prefs(void) {
+  DictionaryIterator *iter;
+  if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
+  dict_write_uint8(iter, MESSAGE_KEY_WatchPrefs,
+                   (clock_is_24h_style() ? 1 : 0) | (watch_is_imperial() ? 2 : 0));
+  app_message_outbox_send();
+}
+
 // Asks the phone for weather only when it would be shown and used: the temperature is on
 // screen (not the seconds), the phone is connected, and the last reading is not recent.
 // Each request wakes the phone app for a location fix and a web request.
@@ -1066,7 +1203,8 @@ static void tick_handler(struct tm *now, TimeUnits changed) {
     subscribe_ticks();
   }
   if (changed & MINUTE_UNIT) {
-    if (s_settings.show_steps) update_steps();
+    if (corner_used(CORNER_STEPS)) update_steps();
+    if (corner_used(CORNER_DISTANCE)) update_distance();
     if (now->tm_min % WEATHER_REFRESH_MIN == 0) refresh_weather_if_needed();
   }
   layer_mark_dirty(s_canvas);
@@ -1209,11 +1347,11 @@ static void health_handler(HealthEventType event, void *context) {
 #endif
 
 // Health events wake the app, so they are only listened to while the heart rate is shown. (The
-// step count is read on the minute tick, which redraws the face anyway.)
+// steps and distance are read on the minute tick, which redraws the face anyway.)
 static void update_health_subscription(void) {
 #if defined(PBL_HEALTH)
   health_service_events_unsubscribe();
-  if (s_settings.heart_rate) {
+  if (corner_used(CORNER_HEART_RATE)) {
     update_heart_rate();
     health_service_events_subscribe(health_handler, NULL);
   }
@@ -1266,6 +1404,7 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   bool settings_changed = false;
   bool play_preview = false;
 
+  if (dict_find(iter, MESSAGE_KEY_RequestPrefs)) send_watch_prefs();
   if ((t = dict_find(iter, MESSAGE_KEY_Temp))) {
     const int16_t temp = (int16_t)tuple_int(t);
     const time_t now = time(NULL);
@@ -1318,30 +1457,31 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     s_settings.temp_unit = strcmp(u, "C") == 0 ? UNIT_C : strcmp(u, "F") == 0 ? UNIT_F : UNIT_AUTO;
     settings_changed = true;
   }
-  // Top bezel
-  if ((t = dict_find(iter, MESSAGE_KEY_ShowBattery))) {
-    s_settings.show_battery = tuple_int(t);
-    settings_changed = true;
+  // Top and bottom bezel corners
+  // (The message keys are variables, so these are filled in at run time.)
+  const uint32_t CORNER_KEYS[SLOTS] = {
+    MESSAGE_KEY_TopLeft, MESSAGE_KEY_TopRight, MESSAGE_KEY_BottomLeft, MESSAGE_KEY_BottomRight,
+  };
+  const uint32_t CORNER_TEXT_KEYS[SLOTS] = {
+    MESSAGE_KEY_TopLeftText, MESSAGE_KEY_TopRightText, MESSAGE_KEY_BottomLeftText,
+    MESSAGE_KEY_BottomRightText,
+  };
+  for (int i = 0; i < SLOTS; i++) {
+    if ((t = dict_find(iter, CORNER_KEYS[i]))) {
+      s_settings.corner[i] = CORNER_NOTHING;
+      for (int k = 0; k < CORNER_TYPES; k++) {
+        if (strcmp(t->value->cstring, CORNER_NAMES[k]) == 0) s_settings.corner[i] = k;
+      }
+      settings_changed = true;
+    }
+    if ((t = dict_find(iter, CORNER_TEXT_KEYS[i]))) {
+      copy_upper(s_settings.corner_text[i], sizeof(s_settings.corner_text[i]), t->value->cstring);
+      settings_changed = true;
+    }
   }
-  if ((t = dict_find(iter, MESSAGE_KEY_TopLeftText))) {
-    copy_upper(s_settings.top_left, sizeof(s_settings.top_left), t->value->cstring);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_ShowSteps))) {
-    s_settings.show_steps = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_TopRightText))) {
-    copy_upper(s_settings.top_right, sizeof(s_settings.top_right), t->value->cstring);
-    settings_changed = true;
-  }
-  // Bottom bezel
-  if ((t = dict_find(iter, MESSAGE_KEY_HeartRate))) {
-    s_settings.heart_rate = tuple_int(t);
-    settings_changed = true;
-  }
-  if ((t = dict_find(iter, MESSAGE_KEY_BezelLabel))) {
-    copy_upper(s_settings.bezel_label, sizeof(s_settings.bezel_label), t->value->cstring);
+  if ((t = dict_find(iter, MESSAGE_KEY_DistanceUnit))) {
+    const char *d = t->value->cstring;
+    s_settings.dist_unit = strcmp(d, "km") == 0 ? DIST_KM : strcmp(d, "mi") == 0 ? DIST_MI : DIST_AUTO;
     settings_changed = true;
   }
   // Appearance
@@ -1359,6 +1499,10 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   }
   if ((t = dict_find(iter, MESSAGE_KEY_Ghosts))) {
     s_settings.ghosts = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ButtonMarkers))) {
+    s_settings.button_markers = tuple_int(t) ? 1 : 0;
     settings_changed = true;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_BacklightColor))) {
@@ -1413,7 +1557,8 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     update_shake_subscription();
     update_health_subscription();
     subscribe_ticks();
-    if (s_settings.show_steps) update_steps();
+    if (corner_used(CORNER_STEPS)) update_steps();
+    if (corner_used(CORNER_DISTANCE)) update_distance();
     refresh_weather_if_needed();
     if (play_preview) play_chime(true);
   }
@@ -1437,11 +1582,8 @@ static void window_unload(Window *window) {
 static void init(void) {
   s_settings = (Settings){
     .day_first = true,
-    .show_battery = true,
-    .top_left = "30 DAY BATT",
-    .show_steps = true,
-    .top_right = "WR 3ATM",
-    .bezel_label = "PEBBLE",
+    .corner = { CORNER_BATTERY, CORNER_STEPS, CORNER_WR, CORNER_TEXT },
+    .corner_text = { "30 DAY BATT", "WR 3ATM", "", "PEBBLE" },
     .slanted = true,
     .ghosts = true,
     .backlight = BACKLIGHT_SYSTEM,
@@ -1452,9 +1594,15 @@ static void init(void) {
     .seconds_burst_s = SECONDS_BURST_DEFAULT_S,
   };
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
+  for (int i = 0; i < SLOTS; i++) {
+    if (s_settings.corner[i] >= CORNER_TYPES) s_settings.corner[i] = CORNER_NOTHING;
+    s_settings.corner_text[i][sizeof(s_settings.corner_text[i]) - 1] = '\0';
+  }
+  if (s_settings.dist_unit > DIST_MI) s_settings.dist_unit = DIST_AUTO;
   // Old saves left padding where these two now live.
   if (s_settings.seconds_on_shake > 1) s_settings.seconds_on_shake = 0;
   if (s_settings.hour_no_zero > 1) s_settings.hour_no_zero = 0;
+  if (s_settings.button_markers > 1) s_settings.button_markers = 0;
   if (s_settings.date_pad > PAD_BOTH_BLANK) s_settings.date_pad = PAD_ZERO;
   if (s_settings.seconds_burst_s < SECONDS_BURST_MIN_S || s_settings.seconds_burst_s > SECONDS_BURST_MAX_S) {
     s_settings.seconds_burst_s = SECONDS_BURST_DEFAULT_S;
@@ -1467,7 +1615,8 @@ static void init(void) {
   s_now = *localtime(&now);
   s_battery = battery_state_service_peek();
   s_connected = connection_service_peek_pebble_app_connection();
-  update_steps();
+  if (corner_used(CORNER_STEPS)) update_steps();
+  if (corner_used(CORNER_DISTANCE)) update_distance();
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){ .load = window_load, .unload = window_unload });

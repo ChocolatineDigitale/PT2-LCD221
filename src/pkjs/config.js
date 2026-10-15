@@ -9,6 +9,18 @@ var VIBE_PATTERNS = [
   { "label": "SOS", "value": "6" }
 ];
 
+// What a corner of the top or bottom bezel can show.
+var CORNER_CHOICES = [
+  { "label": "Battery level", "value": "battery" },
+  { "label": "Step count", "value": "steps" },
+  { "label": "Distance", "value": "distance" },
+  { "label": "Heart rate", "value": "hr" },
+  { "label": "Custom text", "value": "text" },
+  { "label": "Nothing", "value": "none" }
+];
+// The water-resistance badge: only offered on the bottom bezel.
+var WR_CHOICE = { "label": "WR badge", "value": "wr" };
+
 module.exports = [
   { "type": "heading", "defaultValue": "LCD 221" },
   {
@@ -69,16 +81,6 @@ module.exports = [
         ]
       },
       {
-        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
-        "defaultValue": "auto",
-        "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",
-        "options": [
-          { "label": "Follow watch", "value": "auto" },
-          { "label": "Celsius", "value": "C" },
-          { "label": "Fahrenheit", "value": "F" }
-        ]
-      },
-      {
         "type": "select", "messageKey": "SecondsMode", "label": "Seconds ticking", "defaultValue": "always",
         "description": "Shake your wrist to start the seconds. When they are not ticking, the right box shows the temperature.",
         "options": [
@@ -96,23 +98,50 @@ module.exports = [
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Top bezel" },
+      { "type": "heading", "defaultValue": "Units" },
       {
-        "type": "toggle", "messageKey": "ShowBattery", "label": "Show battery level", "defaultValue": true
+        "type": "select", "messageKey": "TempUnit", "label": "Temperature unit",
+        "defaultValue": "auto",
+        "description": "Follow watch shows Fahrenheit when your watch uses imperial units, otherwise Celsius.",
+        "options": [
+          { "label": "Follow watch", "value": "auto" },
+          { "label": "Celsius", "value": "C" },
+          { "label": "Fahrenheit", "value": "F" }
+        ]
       },
       {
-        "type": "input", "messageKey": "TopLeftText", "label": "Left text",
+        "type": "select", "messageKey": "DistanceUnit", "label": "Distance unit", "defaultValue": "auto",
+        "description": "Follow watch shows miles when your watch uses imperial units, otherwise kilometres.",
+        "options": [
+          { "label": "Follow watch", "value": "auto" },
+          { "label": "Kilometres", "value": "km" },
+          { "label": "Miles", "value": "mi" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Top bezel" },
+      {
+        "type": "select", "messageKey": "TopLeft", "label": "Top left", "defaultValue": "battery",
+        "options": CORNER_CHOICES
+      },
+      {
+        "type": "input", "messageKey": "TopLeftText", "label": "Top left text",
         "defaultValue": "30 DAY BATT",
-        "description": "Shown instead of the battery level, in capitals. Leave empty for none.",
+        "description": "Shown in capitals.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       },
       {
-        "type": "toggle", "messageKey": "ShowSteps", "label": "Show step count", "defaultValue": true
+        "type": "select", "messageKey": "TopRight", "label": "Top right", "defaultValue": "steps",
+        "options": CORNER_CHOICES
       },
       {
-        "type": "input", "messageKey": "TopRightText", "label": "Right text",
+        "type": "input", "messageKey": "TopRightText", "label": "Top right text",
         "defaultValue": "WR 3ATM",
-        "description": "Shown instead of the step count, in capitals. Leave empty for none.",
+        "description": "Shown in capitals.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       }
     ]
@@ -122,14 +151,24 @@ module.exports = [
     "items": [
       { "type": "heading", "defaultValue": "Bottom bezel" },
       {
-        "type": "toggle", "messageKey": "HeartRate", "label": "Show heart rate",
-        "defaultValue": false,
-        "description": "Replaces the WR badge with HR and your latest heart rate."
+        "type": "select", "messageKey": "BottomLeft", "label": "Bottom left", "defaultValue": "wr",
+        "options": CORNER_CHOICES.concat([WR_CHOICE])
       },
       {
-        "type": "input", "messageKey": "BezelLabel", "label": "Label", "defaultValue": "PEBBLE",
-        "description": "Text on the right of the bottom bezel, shown in capitals. Leave empty for none.",
-        "attributes": { "maxlength": 12, "autocapitalize": "characters" }
+        "type": "input", "messageKey": "BottomLeftText", "label": "Bottom left text",
+        "defaultValue": "",
+        "description": "Shown in capitals.",
+        "attributes": { "maxlength": 19, "autocapitalize": "characters" }
+      },
+      {
+        "type": "select", "messageKey": "BottomRight", "label": "Bottom right", "defaultValue": "text",
+        "options": CORNER_CHOICES.concat([WR_CHOICE])
+      },
+      {
+        "type": "input", "messageKey": "BottomRightText", "label": "Bottom right text",
+        "defaultValue": "PEBBLE",
+        "description": "Shown in capitals.",
+        "attributes": { "maxlength": 19, "autocapitalize": "characters" }
       }
     ]
   },
@@ -157,6 +196,10 @@ module.exports = [
         "type": "toggle", "messageKey": "Ghosts", "label": "Show unlit segments",
         "defaultValue": true,
         "description": "Faintly show the segments that are off, like a real LCD."
+      },
+      {
+        "type": "toggle", "messageKey": "ButtonMarkers", "label": "Button markers", "defaultValue": false,
+        "description": "Red marks along the edges of the screen where the watch's buttons are."
       },
       {
         "type": "select", "messageKey": "BacklightColor", "label": "Backlight color",

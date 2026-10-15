@@ -7,7 +7,7 @@ path of the SDK on the build computer (with the user name in it). The map is onl
 for debugging, so this drops it, then scans every remaining file for home-directory
 paths and any extra words given with --deny, and fails if it finds one.
 
-    python3 tools/strip_pbw.py                      # build/PebbleFace1.pbw -> build/release.pbw
+    python3 tools/strip_pbw.py                      # build/<folder name>.pbw -> build/release.pbw
     python3 tools/strip_pbw.py IN.pbw OUT.pbw --deny SomeName --deny another
 """
 import argparse
@@ -22,7 +22,8 @@ HOME_PATH = re.compile(rb"/(?:home|Users)/[A-Za-z0-9._-]+|[A-Za-z]:\\Users\\[A-Z
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", nargs="?", default=str(ROOT / "build/PebbleFace1.pbw"))
+    # The SDK names the built file after the project folder.
+    ap.add_argument("source", nargs="?", default=str(ROOT / "build" / (ROOT.name + ".pbw")))
     ap.add_argument("target", nargs="?", default=str(ROOT / "build/release.pbw"))
     ap.add_argument("--deny", action="append", default=[], help="a word that must not appear (repeatable)")
     args = ap.parse_args()

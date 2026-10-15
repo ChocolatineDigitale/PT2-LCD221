@@ -1,19 +1,22 @@
-A Pebble Time 2 watch face that recreates the look of the Casio W-221H digital watch: a crisp LCD with slanted 7-segment digits, faint "unlit" segments like a real display, a dot-matrix weekday and a small BT / CHG / SIG / MUTE indicator box, all between a top and a bottom bezel.
+A Pebble Time 2 watch face that recreates the look of the Casio W-221H: a crisp LCD with slanted 7-segment digits, faint unlit segments, a dot-matrix weekday and a BT / CHG / SIG / MUTE indicator box.
 
 WHAT IT SHOWS
-- Time (12 or 24 hour, with the PM marker), weekday, and date (DD-MM or MM-DD) with a DST indicator
-- Right box: the temperature (C or F, or follow your watch) or the seconds
-- Top bezel: battery level and step count, or your own text instead of either
-- Bottom bezel: a WR badge, or HR and your latest heart rate, plus a text label of your choice
-- Indicators for phone connection, charging, hourly chime and Quiet Time
+- Time (12 or 24 hour), weekday, date and a DST indicator
+- Temperature or seconds
+- Four bezel corners, each showing battery level, steps, distance, heart rate, your own text or nothing, plus an optional WR badge
+- Indicators for phone, charging, hourly chime and Quiet Time
 
 SETTINGS
-Black or silver case, normal or inverted colors, slanted or straight digits, unlit segments on or off, backlight color (system default, ten presets, or any of the app's 64 colors), a choice of vibration patterns when your phone disconnects or reconnects, and Reset to defaults. An optional hourly chime with several sounds, adjustable volume and a Quiet Time option.
+- 12/24-hour, date order, leading zeros, Celsius or Fahrenheit (or follow your watch)
+- Seconds always ticking, or for a set time after a wrist shake
+- Optional hourly chime with volume
+- Black or silver case, inverted colors, slanted or straight digits, unlit segments, backlight color
+- Vibration when your phone disconnects or reconnects
 
 PERMISSIONS
-Location (through your phone) for the weather, and health data for steps and heart rate. The only thing that leaves your phone is a weather request to Open-Meteo containing your location rounded to about 100 meters.
+Location (via your phone) for the weather and health data for steps and heart rate. Only a weather request to Open-Meteo leaves your phone, with your location rounded to about 100 meters.
 
 Pebble Time 2 only.
 
 CREDITS
-Weather data by Open-Meteo.com. Digit shapes from the 7-Segment font by Jan Bobrowski (SIL Open Font License). Casio and W-221H are trademarks of Casio Computer Co., Ltd.; this is an unofficial tribute, not affiliated with Casio or Pebble.
+Made with the help of Claude, an AI assistant from Anthropic. Weather by Open-Meteo.com. Digit shapes from the 7-Segment font by Jan Bobrowski (SIL Open Font License). Casio and W-221H are trademarks of Casio Computer Co., Ltd.; this is an unofficial tribute, not affiliated with Casio or Pebble.

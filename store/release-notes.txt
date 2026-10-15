@@ -1,3 +1,5 @@
-New: "Leading zero in the hour" option: turn it off for 7:05 instead of 07:05 in 24-hour mode, like the original watch.
-New: "Single-digit dates" option: leading zeros (06-05, the default), a blank for the first number only ( 6-05), or blanks for both ( 6- 5).
-The settings in Time & date and Right box are now in a more logical order.
+New: each of the four bezel corners can show the battery level, steps, distance, heart rate, your own text or nothing (the bottom corners also the WR badge). Heart rate in a bottom corner is shown as an HR badge, like the WR one.
+New: Units section with the temperature unit and a distance unit (kilometres or miles, or follow your watch).
+New: the settings page shows a preview of the watch face that follows your choices.
+New: optional red button markers along the screen edges (Appearance, off by default).
+Your settings are reset once because the bezel settings changed.

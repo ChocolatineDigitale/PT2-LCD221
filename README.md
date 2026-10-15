@@ -10,31 +10,33 @@ Inverted colors, and 24-hour time with seconds instead of the temperature:
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 
-Version 1.2.2. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
+Version 1.3.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
 
 | Area | Content |
 |---|---|
-| Top bezel | Battery level and step count, or your own text instead of either (settings) |
+| Top bezel | Two corners, each showing the battery level, steps, distance, heart rate, your own text or nothing (settings). Default: battery level and step count |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
 | Indicator box | **BT** phone connected, **CHG** charging (it becomes **FULL** once the battery is full and the watch is still on the charger), **SIG** an audible hourly chime is set, Quiet Time is off and the watch's speaker is not muted, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
 | Time | Large 7-segment digits (slanted by default). A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD. A **DST** label above it lights while daylight saving time is in effect in your time zone |
 | Right box | Temperature (°C or °F) or seconds |
-| Bottom bezel | A **WR** badge (or **HR** and your latest heart rate) and a text label |
+| Bottom bezel | Two more corners with the same choices, plus the **WR** badge. Heart rate in a bottom corner is shown as an **HR** badge followed by the value (in the top corners as plain text, `HR 72`). Default: the WR badge and the text `PEBBLE` |
 
 Notes:
 
 - Battery is reported by the watch in 10% steps, so it moves 100%, 90%, 80%, ...
-- Steps come from Pebble Health. Heart rate is the latest reading the watch has; it shows `--` when there is none.
+- Steps and distance come from Pebble Health (distance in miles or kilometres, following the watch's units unless you choose). Heart rate is the latest reading the watch has; it shows `--` when there is none.
 - Weather is fetched by the phone from [Open-Meteo](https://open-meteo.com) using its location, at start-up and about every 30 minutes. To save battery, the watch only asks while the temperature can be on screen (not with seconds always on), the phone is connected and the last reading is older than 25 minutes, and the phone app waits at least 5 minutes between fetches (25 minutes when the face is merely opened again). It shows `--` if the data is more than 3 hours old.
 - Unlit segments are drawn as a faint ghost, like a real LCD (can be switched off).
+- Optional red marks (5 px wide, a little taller than the weekday, the inside corners rounded) along the LCD's left and right edges show where the watch's four buttons are: one on the left (at the weekday), and three on the right (opposite it, one lower in the middle, and one mirrored below that, just reaching into the bottom bezel). Off by default (setting "Button markers").
 - The Time 2's backlight is colour-capable. By default the watch face leaves it at your normal system colour, but it can tint it instead (amber like the original's LED, one of ten presets, or any of the 64 colours in the app's picker).
 
 ## Settings
 
 Open the watch face's settings in the Pebble app. Nothing reaches the watch until you tap **Save**.
+A preview at the top of the page (tap it to hide it) follows your choices; it is approximate and uses sample data.
 **Reset to defaults** (at the top of the page; tap it twice, so a stray tap does nothing) puts every option back to the value below (then tap Save).
 
 | Group | Option | Choices (default first) |
@@ -44,19 +46,23 @@ Open the watch face's settings in the Pebble app. Nothing reaches the watch unti
 | | Date format | DD-MM, MM-DD |
 | | Single-digit dates | **Leading zeros** (`06-05`), blank first number only (` 6-05`), or blank both numbers (` 6- 5`, like the original) |
 | Right box | Right box shows | Temperature, Seconds (redraws every second: uses more battery) |
-| | Temperature unit | **Follow watch** (Fahrenheit when the watch uses imperial units, otherwise Celsius), Celsius, Fahrenheit (shown while the temperature can be on screen) |
 | | Seconds ticking | **Always** (every second, the default), or after a wrist shake. Shown only while the right box shows seconds; the right box shows the temperature the rest of the time |
 | | Seconds duration | 30 s. 5 to 120 in steps of 5: how long the seconds tick after a shake (shown only for "After a wrist shake") |
-| Top bezel | Show battery level | On. When off, the left text is shown instead |
-| | Left text | `30 DAY BATT` (up to 19 characters, capitals; only shown while the battery level is off) |
-| | Show step count | On. When off, the right text is shown instead |
-| | Right text | `WR 3ATM` (up to 19 characters, capitals; only shown while the step count is off) |
-| Bottom bezel | Show heart rate | Off. When on, the WR badge becomes HR with the latest heart rate |
-| | Label | `PEBBLE` (up to 12 characters, capitals; empty for none) |
+| Units | Temperature unit | **Follow watch** (Fahrenheit when the watch uses imperial units, otherwise Celsius), Celsius, Fahrenheit |
+| | Distance unit | **Follow watch** (miles when the watch uses imperial units, otherwise kilometres), Kilometres, Miles |
+| Top bezel | Top left | **Battery level**, step count, distance, heart rate, custom text, nothing |
+| | Top left text | `30 DAY BATT` (up to 19 characters, capitals; only shown for custom text) |
+| | Top right | **Step count**, battery level, distance, heart rate, custom text, nothing |
+| | Top right text | `WR 3ATM` (only shown for custom text) |
+| Bottom bezel | Bottom left | **WR badge**, battery level, step count, distance, heart rate, custom text, nothing |
+| | Bottom left text | Empty (only shown for custom text) |
+| | Bottom right | **Custom text**, battery level, step count, distance, heart rate, WR badge, nothing |
+| | Bottom right text | `PEBBLE` (only shown for custom text) |
 | Appearance | Case color | Black, Silver |
 | | Inverted colors | Off, On (light digits on a dark LCD, like a negative-display watch; the case keeps its color) |
 | | Slanted digits | On, Off (leans the digits like the original; straight digits have sharper edges) |
 | | Show unlit segments | On, Off |
+| | Button markers | Off, On (red marks along the screen edges where the watch's buttons are) |
 | | Backlight color | **System default** (your watch's normal colour), Amber, Warm white, Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, **Custom color...** (shows the app's own color picker, the watch's 64 colors) |
 | Alerts | Vibrate on phone disconnect | Double pulse (None, Short, Long, Double, Triple, Heartbeat, SOS) |
 | | Vibrate on phone reconnect | Short pulse (same patterns) |

@@ -306,22 +306,37 @@ module.exports = function () {
         function info(kind, text, bottom) {
           if (kind === 'wr') return { badge: 'WR', text: '' };
           if (kind === 'hr' && bottom) return { badge: 'HR', text: '72' };
+          if (kind === 'steps' && bottom) return { badge: null, text: '8,432', icon: true };
           return { badge: null, text: corner(0, kind, text) };
+        }
+        // The footprints icon (the steps' symbol in the bottom bezel), 15 x 13 dots.
+        var FOOT = ['.####..........','######.........','######.........','######.........','.####.....####.','.........######','.####....######','.####....######','..##......####.','...............','..........####.','..........####.','...........##..'];
+        function footprints(x, y) {
+          ctx.fillStyle = frameText;
+          for (var r = 0; r < FOOT.length; r++) for (var c = 0; c < 15; c++) {
+            if (FOOT[r].charAt(c) === '#') ctx.fillRect(x + c, y + r, 1, 1);
+          }
         }
         function row(kinds, texts, font, baseline, bottom) {
           ctx.font = font; ctx.fillStyle = frameText; ctx.textBaseline = 'alphabetic';
           var left = info(kinds[0], texts[0], bottom), right = info(kinds[1], texts[1], bottom);
           var textw = ctx.measureText(right.text).width + 4;
-          var rw = right.badge ? 30 + (right.text ? 4 + textw : 0) : textw;
+          var rw = right.badge ? 30 + (right.text ? 4 + textw : 0) : (right.icon ? textw + 15 : textw);
           rw = Math.min(rw, bottom ? 108 : 104);
           if (right.badge) {
             badge(190 - rw, baseline, right.badge);
             if (right.text) { ctx.textAlign = 'left'; ctx.fillStyle = frameText; ctx.fillText(right.text, 190 - rw + 34, baseline); }
+          } else if (right.icon) {
+            ctx.textAlign = 'left'; ctx.fillText(right.text, 190 - rw, baseline); footprints(190 - 15, 208);
           } else { ctx.textAlign = 'right'; ctx.fillText(fit(right.text, rw), 190, baseline); }
+          var room = 190 - rw - 14;
           if (left.badge) {
             badge(10, baseline, left.badge);
-            if (left.text) { ctx.textAlign = 'left'; ctx.fillStyle = frameText; ctx.fillText(fit(left.text, 190 - rw - 14 - 34), 44, baseline); }
-          } else { ctx.textAlign = 'left'; ctx.fillText(fit(left.text, 190 - rw - 14), 10, baseline); }
+            if (left.text) { ctx.textAlign = 'left'; ctx.fillStyle = frameText; ctx.fillText(fit(left.text, room - 34), 44, baseline); }
+          } else if (left.icon) {
+            var lw = Math.min(ctx.measureText(left.text).width + 4, room - 15);
+            ctx.textAlign = 'left'; ctx.fillText(left.text, 10, baseline); footprints(10 + lw, 208);
+          } else { ctx.textAlign = 'left'; ctx.fillText(fit(left.text, room), 10, baseline); }
         }
         function badge(x, baseline, letters) {
           ctx.strokeStyle = frameText; ctx.lineWidth = 1;

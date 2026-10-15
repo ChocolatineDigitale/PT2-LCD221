@@ -945,6 +945,30 @@ static void draw_lcd(void) {
 // Top bezel (smaller Gothic 18 bold font): the battery level and step count, or
 // the custom texts when those are switched off. The right text takes the width
 // it needs (up to TOP_RIGHT_MAX) and the left text gets the rest.
+// Footprints: the steps' icon in the bottom bezel (its text is bigger, so there is no room for the
+// word STEPS). 15 x 13 dots.
+#define FOOT_W 15
+#define FOOT_H 13
+#define FOOT_GAP 4  // between the number and the icon
+static const char FOOT_BITS[] =
+  ".####.........."
+  "######........."
+  "######........."
+  "######........."
+  ".####.....####."
+  ".........######"
+  ".####....######"
+  ".####....######"
+  "..##......####."
+  "..............."
+  "..........####."
+  "..........####."
+  "...........##..";
+
+static bool corner_has_icon(int slot) {
+  return s_settings.corner[slot] == CORNER_STEPS && slot >= SLOT_BOTTOM_LEFT;
+}
+
 // The letters of the badge a bottom corner shows ("WR", or "HR" for the heart rate), or NULL.
 static const char *corner_badge(int slot) {
   if (s_settings.corner[slot] == CORNER_WR) return "WR";
@@ -961,10 +985,13 @@ static void corner_string(int slot, char *out, size_t size) {
       snprintf(out, size, "BATT %d%%", s_battery.charge_percent);
       break;
     case CORNER_STEPS:
-      if (s_steps >= 1000) snprintf(out, size, "%d,%03d STEPS", s_steps / 1000, s_steps % 1000);
-      else if (s_steps >= 0) snprintf(out, size, "%d STEPS", s_steps);
-      else snprintf(out, size, "-- STEPS");
+    {
+      const char *unit = corner_has_icon(slot) ? "" : " STEPS";  // the icon says it in the bottom bezel
+      if (s_steps >= 1000) snprintf(out, size, "%d,%03d%s", s_steps / 1000, s_steps % 1000, unit);
+      else if (s_steps >= 0) snprintf(out, size, "%d%s", s_steps, unit);
+      else snprintf(out, size, "--%s", unit);
       break;
+    }
     case CORNER_DISTANCE: {
       const bool miles = use_miles();
       if (s_distance_m < 0) {
@@ -1009,18 +1036,35 @@ static void draw_badge(GContext *ctx, int x, const char *letters) {
   draw_bezel_text(ctx, letters, x, BOTTOM_CAP, WR_BADGE_W, GTextAlignmentCenter);
 }
 
+// The footprints icon, with its top-left corner at (x, y).
+static void draw_footprints(GContext *ctx, int x, int y) {
+  graphics_context_set_fill_color(ctx, s_frame_text);
+  for (int r = 0; r < FOOT_H; r++) {
+    for (int c = 0; c < FOOT_W;) {
+      if (FOOT_BITS[r * FOOT_W + c] != '#') { c++; continue; }
+      int run = 1;
+      while (c + run < FOOT_W && FOOT_BITS[r * FOOT_W + c + run] == '#') run++;
+      graphics_fill_rect(ctx, GRect(x + c, y + r, run, 1), 0, GCornerNone);
+      c += run;
+    }
+  }
+}
+
 // Bottom bezel: like the top one, with badges (the WR badge, or HR followed by the heart rate)
-// as possible corners.
+// and the footprints icon (after the step count) as possible parts of a corner.
 static void draw_bottom_bezel(GContext *ctx) {
+  const GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
   const char *left_badge = corner_badge(SLOT_BOTTOM_LEFT);
   const char *right_badge = corner_badge(SLOT_BOTTOM_RIGHT);
+  const bool left_icon = corner_has_icon(SLOT_BOTTOM_LEFT);
+  const bool right_icon = corner_has_icon(SLOT_BOTTOM_RIGHT);
   char left[24], right[24];
   corner_string(SLOT_BOTTOM_LEFT, left, sizeof(left));
   corner_string(SLOT_BOTTOM_RIGHT, right, sizeof(right));
   const int text_w = graphics_text_layout_get_content_size(
-      right, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD), GRect(0, 0, 190, 30),
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
-  int right_w = right_badge ? WR_BADGE_W + (right[0] ? BADGE_GAP + text_w : 0) : text_w;
+      right, font, GRect(0, 0, 190, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
+  int right_w = right_badge ? WR_BADGE_W + (right[0] ? BADGE_GAP + text_w : 0)
+                            : right_icon ? text_w + FOOT_W : text_w;
   if (right_w > BOTTOM_RIGHT_MAX) right_w = BOTTOM_RIGHT_MAX;
   if (right_badge) {
     const int x = 190 - right_w;  // the badge and its value, as one group against the right edge
@@ -1029,17 +1073,28 @@ static void draw_bottom_bezel(GContext *ctx) {
       draw_bezel_text(ctx, right, x + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP,
                       right_w - WR_BADGE_W - BADGE_GAP, GTextAlignmentLeft);
     }
+  } else if (right_icon) {
+    draw_bezel_text(ctx, right, 190 - right_w, BOTTOM_CAP, right_w - FOOT_W, GTextAlignmentLeft);
+    draw_footprints(ctx, 190 - FOOT_W, BOTTOM_CAP);
   } else {
     draw_bezel_text(ctx, right, 190 - right_w, BOTTOM_CAP, right_w, GTextAlignmentRight);
   }
+  const int left_room = 190 - right_w - 14;  // from x = 10 to the right corner
   if (left_badge) {
     draw_badge(ctx, 10, left_badge);
-    const int avail = 190 - right_w - 14 - WR_BADGE_W - BADGE_GAP;
+    const int avail = left_room - WR_BADGE_W - BADGE_GAP;
     if (left[0] && avail > 0) {
       draw_bezel_text(ctx, left, 10 + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP, avail, GTextAlignmentLeft);
     }
+  } else if (left_icon) {
+    const int lw = graphics_text_layout_get_content_size(
+        left, font, GRect(0, 0, 190, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft).w + 4;
+    const int text_room = left_room - FOOT_W;
+    const int w = lw < text_room ? lw : text_room;
+    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, w, GTextAlignmentLeft);
+    if (text_room > 0) draw_footprints(ctx, 10 + w, BOTTOM_CAP);
   } else {
-    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, 190 - right_w - 14, GTextAlignmentLeft);
+    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, left_room, GTextAlignmentLeft);
   }
 }
 

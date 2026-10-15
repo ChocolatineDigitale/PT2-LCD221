@@ -22,7 +22,7 @@ Version 1.3.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and 
 | Time | Large 7-segment digits (slanted by default). A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD. A **DST** label above it lights while daylight saving time is in effect in your time zone |
 | Right box | Temperature (°C or °F) or seconds |
-| Bottom bezel | Two more corners with the same choices, plus the **WR** badge. Heart rate in a bottom corner is shown as an **HR** badge followed by the value (in the top corners as plain text, `HR 72`). Default: the WR badge and the text `PEBBLE` |
+| Bottom bezel | Two more corners with the same choices, plus the **WR** badge. Heart rate in a bottom corner is shown as an **HR** badge followed by the value (in the top corners as plain text, `HR 72`). Steps in a bottom corner are shown as the number followed by a footprints icon (in the top corners as `8,432 STEPS`). Default: the WR badge and the text `PEBBLE` |
 
 Notes:
 

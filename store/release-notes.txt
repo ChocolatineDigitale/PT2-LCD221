@@ -1,4 +1,4 @@
-New: each of the four bezel corners can show the battery level, steps, distance, heart rate, your own text or nothing (the bottom corners also the WR badge). Heart rate in a bottom corner is shown as an HR badge, like the WR one.
+New: each of the four bezel corners can show the battery level, steps, distance, heart rate, your own text or nothing (the bottom corners also the WR badge). Heart rate in a bottom corner is shown as an HR badge, like the WR one. Steps in a bottom corner use a footprints icon instead of the word STEPS.
 New: Units section with the temperature unit and a distance unit (kilometres or miles, or follow your watch).
 New: the settings page shows a preview of the watch face that follows your choices.
 New: optional red button markers along the screen edges (Appearance, off by default).

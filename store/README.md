@@ -8,7 +8,7 @@ What to enter in the Rebble Developer Portal (dev-portal.rebble.io) for LCD 221:
 | Type | Watchface |
 | Title | LCD 221 |
 | Description | `description.txt` (under 1600 characters) |
-| Screenshots (Pebble Time 2) | `screenshots/1-default.png`, `2-inverted.png`, `3-seconds.png`, in that order |
+| Screenshots (Pebble Time 2) | `screenshots/1-default.png`, `2-inverted.png`, `3-seconds.png`, then `4-weather.png`, `5-air-quality.png`, `6-imperial.png`, `7-silver-seconds.png`, `8-snow.png`, in that order |
 | Release | `LCD221-1.3.0.pbw` (made with `python3 tools/strip_pbw.py`) |
 | Release notes | `release-notes.txt` |
 | Support email | a throwaway address, not the account email |

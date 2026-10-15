@@ -6,7 +6,7 @@
 // allows things the drawing API can't do: polygon segments with a slant and
 // gray-shade anti-aliasing, and faint "ghost" segments for the unlit parts (a
 // sparse ordered dither). Only the bezel text and indicator labels go through
-// the regular text API.
+// the regular text API (the bezel text is then re-sampled and cached, see "Bezel text").
 //
 // File map (search for the "----" section banners):
 //   raster primitives  span/fill and the ghost dither
@@ -31,9 +31,9 @@
 #define LCD_SLANT 75
 #define LCD_AA true
 #define SETTINGS_KEY 18  // bumped whenever existing Settings fields change layout (new fields may use free padding)
-#define WEATHER_KEY 5  // bumped whenever Weather changes layout
-#define WEATHER_MAX_AGE (3 * 60 * 60)
-#define WEATHER_REFRESH_MIN 30
+#define WEATHER_KEY 8  // bumped whenever Weather changes layout
+#define WEATHER_MIN_MAX_AGE (3 * 60 * 60)  // shown as valid for this long, or twice the refresh interval if longer
+#define WEATHER_REFRESH_DEFAULT 30  // minutes (setting: 30 to 720)
 #define SECONDS_BURST_DEFAULT_S 30  // how long the seconds tick after a shake (setting: 5..120)
 #define SECONDS_BURST_MIN_S 5
 #define SECONDS_BURST_MAX_S 120
@@ -62,13 +62,21 @@ enum { UNIT_AUTO = 0, UNIT_C = 1, UNIT_F = 2 };
 // Date padding: zeros, a blank for the first number only, or blanks for both numbers.
 enum { PAD_ZERO = 0, PAD_FIRST_BLANK = 1, PAD_BOTH_BLANK = 2 };
 // What a corner of the top or bottom bezel shows. The names are what the settings page sends.
+// From CORNER_WX on, a corner shows a weather reading: see WX_CORNERS.
 enum { CORNER_NOTHING = 0, CORNER_BATTERY, CORNER_STEPS, CORNER_DISTANCE, CORNER_HEART_RATE,
-       CORNER_TEXT, CORNER_WR, CORNER_TYPES };
-static const char *const CORNER_NAMES[CORNER_TYPES] = {
+       CORNER_TEXT, CORNER_WR, CORNER_WX };
+static const char CORNER_NAMES[CORNER_WX][9] = {
   "none", "battery", "steps", "distance", "hr", "text", "wr",
 };
+// The readings the phone sends (in this order: see src/pkjs/index.js), each a 16-bit number.
+enum { WX_TEMP, WX_FEELS, WX_HIGH, WX_LOW, WX_DEW, WX_HUMIDITY, WX_RAIN, WX_CHANCE, WX_SNOWFALL,
+       WX_SNOWDEPTH, WX_WIND, WX_GUST, WX_DIR, WX_PRESSURE, WX_CLOUD, WX_VIS, WX_UV, WX_UVMAX,
+       WX_SUNRISE, WX_SUNSET, WX_COND, WX_COUNT };
+enum { AQ_US, AQ_EU, AQ_PM25, AQ_PM10, AQ_O3, AQ_NO2, AQ_SO2, AQ_CO, AQ_DUST, AQ_COUNT };
+#define WX_NONE INT16_MIN  // a reading the phone did not have
 enum { SLOT_TOP_LEFT = 0, SLOT_TOP_RIGHT, SLOT_BOTTOM_LEFT, SLOT_BOTTOM_RIGHT, SLOTS };
 enum { DIST_AUTO = 0, DIST_KM = 1, DIST_MI = 2 };
+enum { WUNITS_AUTO = 0, WUNITS_METRIC = 1, WUNITS_IMPERIAL = 2 };  // wind and rain
 
 // Everything the settings page controls, grouped and ordered like the page itself
 // (config.js). Saved with persist_write_data: bump SETTINGS_KEY when it changes.
@@ -103,11 +111,16 @@ typedef struct {
   uint8_t hour_no_zero;        // 1: 24-hour time has no leading zero (7:05, like the original)
   uint8_t date_pad;            // single-digit date numbers: PAD_ZERO (06-05), PAD_FIRST_BLANK ( 6-05), PAD_BOTH_BLANK ( 6- 5)
   uint8_t button_markers;       // 1: red marks along the LCD edges, where the watch's buttons are
+  uint8_t weather_refresh;     // minutes between weather updates, divided by 10 (3 = 30 minutes)
+  uint8_t weather_units;       // WUNITS_*: units of the wind speed and the rain
+  uint8_t aqi_eu;              // 1: the European air quality index, 0: the US one
 } Settings;
 
 typedef struct {
-  int16_t temp;                // tenths of a degree Celsius
+  int16_t wx[WX_COUNT];        // the weather readings, WX_NONE if unknown (units: see index.js)
+  int16_t aq[AQ_COUNT];        // the air quality readings, in a message of their own
   time_t updated;
+  time_t aqi_updated;
 } Weather;
 
 static Window *s_window;
@@ -201,7 +214,7 @@ static int snap_axis(int v, int size, const int16_t *knots, const int *px, int c
   while (k + 2 < count && v > knots[k + 1]) k++;
   int a = k == 0 ? 0 : px[k], b = px[k + 1];
   int ka = k == 0 ? 0 : knots[k], kb = knots[k + 1];
-  int64_t at = a * 1000 + (kb == ka ? 0 : (int64_t)(v - ka) * (b - a) * 1000 / (kb - ka));
+  int32_t at = a * 1000 + (kb == ka ? 0 : (int32_t)(v - ka) * (b - a) * 1000 / (kb - ka));  // fits 32 bits: at most 1000 * 96 * 1000
   return (int)((at + size / 2) / size);  // font units of the snapped pixel position
 }
 
@@ -352,51 +365,42 @@ static void draw_digit(int x, int y, int w, int h, int value) {
 // Dot-matrix glyphs ('#' = lit)
 
 // Day-of-week letters: 5x5, matching the W-221H's dot-matrix day display.
-static const char *day_glyph(char ch) {
-  switch (ch) {
-    case 'A': return ".###.#...#######...##...#";  // .###. #...# ##### #...# #...#
-    case 'D': return "####.#...##...##...#####.";  // ####. #...# #...# #...# ####.
-    case 'E': return "######....####.#....#####";  // ##### #.... ####. #.... #####
-    case 'F': return "######....####.#....#....";  // ##### #.... ####. #.... #....
-    case 'H': return "#...##...#######...##...#";  // #...# #...# ##### #...# #...#
-    case 'I': return ".###...#....#....#...###.";  // .###. ..#.. ..#.. ..#.. .###.
-    case 'M': return "#...###.###.#.##...##...#";  // #...# ##.## #.#.# #...# #...#
-    case 'N': return "#...###..##.#.##..###...#";  // #...# ##..# #.#.# #..## #...#
-    case 'O': return ".###.#...##...##...#.###.";  // .###. #...# #...# #...# .###.
-    case 'R': return "####.#...#####.#..#.#...#";  // ####. #...# ####. #..#. #...#
-    case 'S': return ".#####.....###.....#####.";  // .#### #.... .###. ....# ####.
-    case 'T': return "#####..#....#....#....#..";  // ##### ..#.. ..#.. ..#.. ..#..
-    case 'U': return "#...##...##...##...#.###.";  // #...# #...# #...# #...# .###.
-    case 'W': return "#...##...##.#.###.###...#";  // #...# #...# #.#.# ##.## #...#
-    default:  return NULL;
+// Each glyph is a list of rows, one bit per dot (bit 0 = the leftmost column).
+static const struct { char ch; uint16_t rows[5]; } DAY_GLYPHS[] = {
+  { 'A', { 14, 17, 31, 17, 17 } },
+  { 'D', { 15, 17, 17, 17, 15 } },
+  { 'E', { 31, 1, 15, 1, 31 } },
+  { 'F', { 31, 1, 15, 1, 1 } },
+  { 'H', { 17, 17, 31, 17, 17 } },
+  { 'I', { 14, 4, 4, 4, 14 } },
+  { 'M', { 17, 27, 21, 17, 17 } },
+  { 'N', { 17, 19, 21, 25, 17 } },
+  { 'O', { 14, 17, 17, 17, 14 } },
+  { 'R', { 15, 17, 15, 9, 17 } },
+  { 'S', { 30, 1, 14, 16, 15 } },
+  { 'T', { 31, 4, 4, 4, 4 } },
+  { 'U', { 17, 17, 17, 17, 14 } },
+  { 'W', { 17, 17, 21, 27, 17 } },
+};
+
+static const uint16_t *day_glyph(char ch) {
+  for (unsigned i = 0; i < ARRAY_LENGTH(DAY_GLYPHS); i++) {
+    if (DAY_GLYPHS[i].ch == ch) return DAY_GLYPHS[i].rows;
   }
+  return NULL;
 }
 
 // The "P" (PM) marker: an 11x14 LCD symbol with a square-ish bowl (corners cut by a dot)
 // and a straight stem.
-static const char PM_BITS[] =
-  "#########.."
-  "###########"
-  "###.....###"
-  "###.....###"
-  "###.....###"
-  "###.....###"
-  "###########"
-  "#########.."
-  "###........"
-  "###........"
-  "###........"
-  "###........"
-  "###........"
-  "###........";
+static const uint16_t PM_BITS[14] = { 511, 2047, 1799, 1799, 1799, 1799, 2047, 511, 7, 7, 7, 7, 7, 7 };
 
 // Draws a grid of `cols` x `rows` dots. With `on` false, the '#' dots are drawn
 // as ghosts instead (an unlit fixed LCD symbol).
-static void draw_dots(int x, int y, const char *bits, int cols, int rows, int pitch, int dot, bool on) {
+static void draw_dots(int x, int y, const uint16_t *bits, int cols, int rows, int pitch, int dot, bool on) {
   if (!bits || (!on && !s_settings.ghosts)) return;
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
-      if (bits[r * cols + c] != '#') continue;
+      if (!((bits[r] >> c) & 1)) continue;
       fill(x + c * pitch, y + r * pitch, dot, dot, on ? s_ink : s_ghost, !on);
     }
   }
@@ -404,11 +408,11 @@ static void draw_dots(int x, int y, const char *bits, int cols, int rows, int pi
 
 // Dot-matrix cell: lit dots solid, the rest as ghosts (if enabled). Dots are
 // dot_w x dot_h rectangles on a px x py grid.
-static void draw_matrix(int x, int y, const char *bits, int cols, int rows, int px, int py, int dot_w,
+static void draw_matrix(int x, int y, const uint16_t *bits, int cols, int rows, int px, int py, int dot_w,
                         int dot_h) {
   for (int r = 0; r < rows; r++) {
     for (int c = 0; c < cols; c++) {
-      bool lit = bits && bits[r * cols + c] == '#';
+      bool lit = bits && ((bits[r] >> c) & 1);
       if (!lit && !s_settings.ghosts) continue;
       fill(x + c * px, y + r * py, dot_w, dot_h, lit ? s_ink : s_ghost, !lit);
     }
@@ -426,9 +430,18 @@ static void draw_day(int x, int y, const char *text) {
 // ---------------------------------------------------------------------------
 // Data helpers
 
-static bool weather_valid(void) {
-  return s_weather.updated != 0 && time(NULL) - s_weather.updated <= WEATHER_MAX_AGE;
+static int weather_refresh_min(void) {
+  return s_settings.weather_refresh * 10;
 }
+
+// Whether a reading made at `when` is recent enough to show.
+static bool reading_valid(time_t when) {
+  int max_age = 2 * weather_refresh_min() * 60;
+  if (max_age < WEATHER_MIN_MAX_AGE) max_age = WEATHER_MIN_MAX_AGE;
+  return when != 0 && time(NULL) - when <= max_age;
+}
+
+static bool weather_valid(void) { return reading_valid(s_weather.updated); }
 
 static void update_heart_rate(void) {
 #if defined(PBL_HEALTH)
@@ -513,7 +526,7 @@ static void apply_backlight(void) {
 #define LCD_X 0
 #define LCD_Y 24
 #define LCD_W 200
-#define LCD_H 176
+#define LCD_H 180
 
 // Row 1: weekday (left) and the 2x2 indicator box (right).
 #define WEEKDAY_X 12
@@ -534,7 +547,7 @@ static void apply_backlight(void) {
 // 4px from the edge, with the PM marker in the empty left part of that box. (The
 // original's marker starts level with the digits and 6px from the edge; here it is
 // nudged up and in a little.)
-#define TIME_Y 76
+#define TIME_Y 80
 #define TIME_W 35
 #define TIME_H 70
 #define PM_X 7    // the PM marker's distance from the LCD's left edge
@@ -542,38 +555,30 @@ static void apply_backlight(void) {
 
 // Row 3: date (left) and seconds / temperature (right), under a 2px rule.
 #define DST_X 4         // DST label cell, top left of the date cell
-#define DST_Y 157
+#define DST_Y 161
 #define DST_W 34
 #define DST_H 12
-#define ROW3_LINE_Y 154
+#define ROW3_LINE_Y 158
 #define ROW3_DIV_X 110  // vertical divider between the date and the right box
-#define ROW3_Y 160      // top of the right box's digits
+#define ROW3_Y 164      // top of the right box's digits
 #define ROW3_H 36       // height of the right box's digits
 #define TEMP_X 3        // horizontal offset of the whole temperature group (sign, digits, degree)
 
 // Bezels.
 #define TOP_RIGHT_MAX 104  // widest the top-right bezel text may be
 #define BOTTOM_RIGHT_MAX 108  // widest the bottom-right bezel text may be
-#define WR_BADGE_W 30      // a badge (WR / HR)
+#define WR_BADGE_W 28      // a badge (WR / HR)
 #define BADGE_GAP 4        // between a badge and the value beside it
-#define BOTTOM_CAP 208     // top of the bottom bezel's 14px capitals (centred in the bezel)
+#define BEZEL_ROWS 14      // height of the bezel capitals, in pixels
+#define TOP_CAP_Y ((24 - BEZEL_ROWS) / 2)               // first row of the top bezel's capitals
+#define BOTTOM_CAP_Y (LCD_Y + LCD_H + (24 - BEZEL_ROWS) / 2 + 1)  // ... and of the bottom bezel's
 
-static const char *const DAYS[] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+// The weekday names, three letters each, in one string (a table of pointers would take RAM).
+static const char DAYS[] = "SUNMONTUEWEDTHUFRISAT";
 
 static void draw_text(GContext *ctx, const char *text, GRect box, GTextAlignment align, GColor color) {
   graphics_context_set_text_color(ctx, color);
   graphics_draw_text(ctx, text, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), box,
-                     GTextOverflowModeTrailingEllipsis, align, NULL);
-}
-
-// Printed bezel text: larger (Gothic 24 bold) for readability. `y` is the top
-// of the capitals; the font draws them BEZEL_CAP_OFFSET below the box top.
-#define BEZEL_CAP_OFFSET 10
-static void draw_bezel_text(GContext *ctx, const char *text, int x, int y, int w,
-                            GTextAlignment align) {
-  graphics_context_set_text_color(ctx, s_frame_text);
-  graphics_draw_text(ctx, text, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-                     GRect(x, y - BEZEL_CAP_OFFSET, w, 30),
                      GTextOverflowModeTrailingEllipsis, align, NULL);
 }
 
@@ -597,11 +602,20 @@ _Static_assert(BOX_MID - BOX_TOP - 2 <= FIT_MAX_H && BOX_BOTTOM - BOX_MID - 2 <=
 
 typedef uint8_t FitRows[FIT_MAX_H][FIT_MAX_W];
 
+// Scratch space for re-sampling text. The labels (draw_fitted_text) and the bezel text
+// (bezel_text_render) are never made at the same time, so they share it.
+#define BZ_H 20             // tallest bezel text result (capitals and a comma)
+#define BZ_MAX_LETTER 40    // widest bezel letter (or letters that touch)
+static union {
+  struct { FitRows buf, out; } fit;
+  uint8_t letter[BZ_H][BZ_MAX_LETTER];
+} s_scratch;
+
 // The longest horizontal run of ink in one row of a letter (columns x0..x1).
-static int longest_run(const FitRows buf, int y, int x0, int x1) {
+static int longest_run(const uint8_t *buf, int stride, int y, int x0, int x1) {
   int best = 0, run = 0;
   for (int x = x0; x <= x1; x++) {
-    run = buf[y][x] ? run + 1 : 0;
+    run = buf[y * stride + x] ? run + 1 : 0;
     if (run > best) best = run;
   }
   return best;
@@ -613,16 +627,16 @@ static int longest_run(const FitRows buf, int y, int x0, int x1) {
 // letter's other bars stay 2px). Among the rest, the row most like its neighbour
 // wins, then the one nearest the middle of the letter, where a letter is usually
 // just vertical strokes.
-static int row_to_drop(const FitRows buf, const int *rows, int n, int x0, int x1) {
+static int row_to_drop(const uint8_t *buf, int stride, const int *rows, int n, int x0, int x1) {
   int best = n / 2, best_cost = 1 << 30;
   for (int i = 1; i < n - 1; i++) {
     int up = 0, down = 0;
     for (int x = x0; x <= x1; x++) {
-      up += buf[rows[i]][x] != buf[rows[i - 1]][x];
-      down += buf[rows[i]][x] != buf[rows[i + 1]][x];
+      up += buf[rows[i] * stride + x] != buf[rows[i - 1] * stride + x];
+      down += buf[rows[i] * stride + x] != buf[rows[i + 1] * stride + x];
     }
     int like = up < down ? up : down;  // differences from the most similar neighbour
-    int bar = longest_run(buf, rows[i], x0, x1) >= BAR_RUN ? 1000 : 0;
+    int bar = longest_run(buf, stride, rows[i], x0, x1) >= BAR_RUN ? 1000 : 0;
     int middle = abs(2 * i - (n - 1));
     int cost = bar + like * 10 + middle;
     if (cost < best_cost) { best_cost = cost; best = i; }
@@ -657,7 +671,7 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
     graphics_release_frame_buffer(ctx, fb);
     return;
   }
-  static FitRows buf, out;
+  uint8_t (*buf)[FIT_MAX_W] = s_scratch.fit.buf, (*out)[FIT_MAX_W] = s_scratch.fit.out;
   for (int y = 0; y < h; y++) {
     GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, iy0 + y);
     for (int x = 0; x < w; x++) {
@@ -685,7 +699,7 @@ static void draw_fitted_text(GContext *ctx, const char *text, GRect cell, const 
     int rows[FIT_MAX_H], n = h;
     for (int i = 0; i < h; i++) rows[i] = i;
     while (n > height) {
-      int drop = row_to_drop(buf, rows, n, start, last);
+      int drop = row_to_drop(&buf[0][0], FIT_MAX_W, rows, n, start, last);
       for (int i = drop; i < n - 1; i++) rows[i] = rows[i + 1];
       n--;
     }
@@ -755,15 +769,23 @@ static bool use_miles(void) {
   return watch_is_imperial();
 }
 
-// The stored temperature (tenths of a degree Celsius) in the unit shown, rounded.
-static int display_temp(void) {
-  int t10 = s_weather.temp;
+// Wind speed and rain in miles per hour / inches rather than km/h / mm.
+static bool use_imperial_weather(void) {
+  if (s_settings.weather_units != WUNITS_AUTO) return s_settings.weather_units == WUNITS_IMPERIAL;
+  return watch_is_imperial();
+}
+
+// A temperature in tenths of a degree Celsius, in the unit shown, rounded.
+static int temp_in_unit(int t10) {
   if (use_fahrenheit()) {
     int f50 = t10 * 9 + 1600;  // fiftieths of a degree Fahrenheit, rounded only once below
     return (f50 + (f50 >= 0 ? 25 : -25)) / 50;
   }
   return (t10 + (t10 >= 0 ? 5 : -5)) / 10;
 }
+
+// The temperature in the right box.
+static int display_temp(void) { return temp_in_unit(s_weather.wx[WX_TEMP]); }
 
 // The indicator box's outline. Like the W-221H, the top-right and bottom-left
 // corners are rounded (radius BOX_RADIUS); the outer frame is 2px, the inner
@@ -856,7 +878,7 @@ static void draw_seconds(void) {
 static void draw_temperature(void) {
   const int dy = ROW3_Y, dh = ROW3_H;
   int temp = display_temp(), v = abs(temp);
-  bool valid = weather_valid();
+  bool valid = weather_valid() && s_weather.wx[WX_TEMP] != WX_NONE;
   bool neg = valid && temp < 0, hundred = valid && v >= 100;
   // The minus is the font's middle bar in a narrow box; the "1" is the right
   // verticals of a full-width digit placed so they land in the sign slot.
@@ -875,14 +897,7 @@ static void draw_temperature(void) {
   }
   // Degree mark: a round 7x7 ring, 2px thick, shifted with the digits' slanted
   // top edge.
-  static const char DEGREE_BITS[] =
-    "..###.."
-    ".#####."
-    "##...##"
-    "##...##"
-    "##...##"
-    ".#####."
-    "..###..";
+  static const uint16_t DEGREE_BITS[7] = { 28, 62, 99, 99, 99, 62, 28 };
   draw_dots(TEMP_X + 180 + (dh - 4) * s_slant / 1000, dy, DEGREE_BITS, 7, 7, 1, 1, true);
 }
 
@@ -909,7 +924,7 @@ static bool seconds_showing(void) {
 #define MARKER_W 5
 #define MARKER_H 32         // a little over the weekday's 29 rows
 #define MARKER_UPPER_CY 44  // centre of the upper markers (the weekday's centre is 48.5)
-#define MARKER_MID_CY 117   // centre of the middle marker; the lowest one mirrors the upper one
+#define MARKER_MID_CY 119   // centre of the middle marker; the lowest one mirrors the upper one
 
 // One marker with its left edge at x. `inner_right`: its inside edge is the right one.
 static void draw_marker(int x, int cy, bool inner_right) {
@@ -932,7 +947,10 @@ static void draw_button_markers(void) {
 
 static void draw_lcd(void) {
   if (s_settings.button_markers) draw_button_markers();
-  draw_day(WEEKDAY_X, WEEKDAY_Y, DAYS[s_now.tm_wday]);
+  char day[4];
+  memcpy(day, DAYS + 3 * s_now.tm_wday, 3);
+  day[3] = '\0';
+  draw_day(WEEKDAY_X, WEEKDAY_Y, day);
   draw_indicator_frame();
   draw_time();
   fill(LCD_X, ROW3_LINE_Y, LCD_W, 2, s_ink, false);
@@ -942,31 +960,14 @@ static void draw_lcd(void) {
   else draw_temperature();
 }
 
-// Top bezel (smaller Gothic 18 bold font): the battery level and step count, or
-// the custom texts when those are switched off. The right text takes the width
-// it needs (up to TOP_RIGHT_MAX) and the left text gets the rest.
-// Footprints: the steps' icon in the bottom bezel (its text is bigger, so there is no room for the
-// word STEPS). 15 x 13 dots.
-#define FOOT_W 15
+// Footprints: the steps' icon, shown instead of the word STEPS. 15 x 13 dots.
+#define FOOT_BW 12  // the bitmap's width
 #define FOOT_H 13
-#define FOOT_GAP 4  // between the number and the icon
-static const char FOOT_BITS[] =
-  ".####.........."
-  "######........."
-  "######........."
-  "######........."
-  ".####.....####."
-  ".........######"
-  ".####....######"
-  ".####....######"
-  "..##......####."
-  "..............."
-  "..........####."
-  "..........####."
-  "...........##..";
+#define FOOT_W 16   // the room the icon takes: the bitmap, slanted by 20 degrees (rows shift up to 2 px each way)
+static const uint16_t FOOT_BITS[FOOT_H] = { 14, 15, 15, 15, 1806, 3968, 3982, 3982, 1796, 0, 896, 896, 256 };
 
 static bool corner_has_icon(int slot) {
-  return s_settings.corner[slot] == CORNER_STEPS && slot >= SLOT_BOTTOM_LEFT;
+  return s_settings.corner[slot] == CORNER_STEPS;
 }
 
 // The letters of the badge a bottom corner shows ("WR", or "HR" for the heart rate), or NULL.
@@ -974,6 +975,150 @@ static const char *corner_badge(int slot) {
   if (s_settings.corner[slot] == CORNER_WR) return "WR";
   if (s_settings.corner[slot] == CORNER_HEART_RATE && slot >= SLOT_BOTTOM_LEFT) return "HR";
   return NULL;
+}
+
+// ---- Weather corners ---------------------------------------------------------------------
+// How a reading is written. Values are as the phone sends them (index.js): temperatures in tenths
+// of a degree C, speeds in tenths of a km/h, rain and snowfall in tenths of a mm / cm, pressure in
+// tenths of a hPa, visibility in tenths of a km, the UV index and the air pollutants in tenths.
+enum { F_TEMP, F_HILO, F_PCT, F_TENTHS, F_ROUND, F_AQI, F_SPEED, F_RAIN, F_SNOWFALL, F_DEPTH, F_DIR,
+       F_PRESSURE, F_VISIBILITY, F_COND, F_TIME };
+enum { SRC_WX, SRC_AIR };
+typedef struct {
+  char name[11];      // what the settings page sends
+  char label[7];      // printed before the value
+  uint8_t src, idx, fmt;
+} WxCorner;  // (no pointers: the table then stays in flash instead of being copied to RAM)
+// The first five are the earliest weather corners: their numbers are saved in settings.
+static const WxCorner WX_CORNERS[] = {
+  { "uv",        "UV",     SRC_WX,  WX_UV,       F_TENTHS },
+  { "wind",      "",       SRC_WX,  WX_WIND,     F_SPEED },
+  { "rain",      "",       SRC_WX,  WX_RAIN,     F_RAIN },
+  { "humidity",  "HUM",    SRC_WX,  WX_HUMIDITY, F_PCT },
+  { "aqi",       "AQI",    SRC_AIR, AQ_US,       F_AQI },
+  { "feels",     "FEELS",  SRC_WX,  WX_FEELS,    F_TEMP },
+  { "hilo",      "",       SRC_WX,  WX_HIGH,     F_HILO },
+  { "chance",    "RAIN",   SRC_WX,  WX_CHANCE,   F_PCT },
+  { "sunrise",   "SR",     SRC_WX,  WX_SUNRISE,  F_TIME },
+  { "sunset",    "SS",     SRC_WX,  WX_SUNSET,   F_TIME },
+  { "winddir",   "",       SRC_WX,  WX_DIR,      F_DIR },
+  { "gust",      "G",      SRC_WX,  WX_GUST,     F_SPEED },
+  { "pressure",  "",       SRC_WX,  WX_PRESSURE, F_PRESSURE },
+  { "cloud",     "CLOUD",  SRC_WX,  WX_CLOUD,    F_PCT },
+  { "visibility", "VIS",   SRC_WX,  WX_VIS,      F_VISIBILITY },
+  { "dew",       "DEW",    SRC_WX,  WX_DEW,      F_TEMP },
+  { "cond",      "",       SRC_WX,  WX_COND,     F_COND },
+  { "snowfall",  "SNOW",   SRC_WX,  WX_SNOWFALL, F_SNOWFALL },
+  { "snowdepth", "DEPTH",  SRC_WX,  WX_SNOWDEPTH, F_DEPTH },
+  { "uvmax",     "UV MAX", SRC_WX,  WX_UVMAX,    F_ROUND },
+  { "pm25",      "PM2.5",  SRC_AIR, AQ_PM25,     F_ROUND },
+  { "pm10",      "PM10",   SRC_AIR, AQ_PM10,     F_ROUND },
+  { "ozone",     "O3",     SRC_AIR, AQ_O3,       F_ROUND },
+  { "no2",       "NO2",    SRC_AIR, AQ_NO2,      F_ROUND },
+  { "so2",       "SO2",    SRC_AIR, AQ_SO2,      F_ROUND },
+  { "co",        "CO",     SRC_AIR, AQ_CO,       F_ROUND },
+  { "dust",      "DUST",   SRC_AIR, AQ_DUST,     F_ROUND },
+};
+#define WX_CORNER_COUNT ((int)ARRAY_LENGTH(WX_CORNERS))
+#define CORNER_TYPES (CORNER_WX + WX_CORNER_COUNT)
+
+static const WxCorner *wx_corner(int slot) {
+  const int type = s_settings.corner[slot];
+  return type >= CORNER_WX && type < CORNER_TYPES ? &WX_CORNERS[type - CORNER_WX] : NULL;
+}
+
+// Whether any corner shows a reading of the weather (SRC_WX) or of the air quality (SRC_AIR).
+static bool wx_source_used(int src) {
+  for (int i = 0; i < SLOTS; i++) {
+    const WxCorner *c = wx_corner(i);
+    if (c && c->src == src) return true;
+  }
+  return false;
+}
+
+// The reading a corner shows, WX_NONE if it is missing or too old.
+static int wx_value(const WxCorner *c) {
+  const bool air = c->src == SRC_AIR;
+  if (!(air ? reading_valid(s_weather.aqi_updated) : weather_valid())) return WX_NONE;
+  const int idx = (c->fmt == F_AQI && s_settings.aqi_eu) ? AQ_EU : c->idx;
+  return air ? s_weather.aq[idx] : s_weather.wx[idx];
+}
+
+static void weather_string(const WxCorner *c, char *out, size_t size) {
+  static const char DIRS[16][4] = { "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW",
+                                    "WSW", "W", "WNW", "NW", "NNW" };
+  static const char CONDS[][8] = { "CLEAR", "PARTLY", "CLOUDY", "FOG", "DRIZZLE", "RAIN", "SNOW",
+                                   "SHOWERS", "STORM" };
+  const int v = wx_value(c);
+  const bool imperial = use_imperial_weather();
+  char head[8];
+  snprintf(head, sizeof(head), "%s%s", c->label, c->label[0] ? " " : "");
+  if (v == WX_NONE) {
+    snprintf(out, size, "%s--", head);
+    return;
+  }
+  switch (c->fmt) {
+    case F_TEMP:
+      snprintf(out, size, "%s%d", head, temp_in_unit(v));
+      break;
+    case F_HILO: {
+      const int low = s_weather.wx[c->idx + 1];
+      if (low == WX_NONE) snprintf(out, size, "H %d L --", temp_in_unit(v));
+      else snprintf(out, size, "H %d L %d", temp_in_unit(v), temp_in_unit(low));
+      break;
+    }
+    case F_PCT:
+      snprintf(out, size, "%s%d%%", head, v);
+      break;
+    case F_TENTHS:
+      snprintf(out, size, "%s%d.%d", head, v / 10, v % 10);
+      break;
+    case F_ROUND:
+      snprintf(out, size, "%s%d", head, (v + 5) / 10);
+      break;
+    case F_AQI:
+      snprintf(out, size, "%s%d", head, v);
+      break;
+    case F_SPEED:
+      if (imperial) snprintf(out, size, "%s%d MPH", head, (v * 621 + 5000) / 10000);
+      else snprintf(out, size, "%s%d KM/H", head, (v + 5) / 10);
+      break;
+    case F_RAIN:
+    case F_SNOWFALL:
+      if (imperial) {  // hundredths of an inch (rain in mm, snow in cm: the same step of 25.4)
+        const int h = c->fmt == F_RAIN ? (v * 100 + 127) / 254 : (v * 1000 + 127) / 254;
+        snprintf(out, size, "%s%d.%02d IN", head, h / 100, h % 100);
+      } else {
+        snprintf(out, size, "%s%d.%d %s", head, v / 10, v % 10, c->fmt == F_RAIN ? "MM" : "CM");
+      }
+      break;
+    case F_DEPTH:
+      if (imperial) snprintf(out, size, "%s%d IN", head, (v * 100 + 127) / 254);
+      else snprintf(out, size, "%s%d CM", head, v);
+      break;
+    case F_DIR:
+      snprintf(out, size, "%s%s", head, DIRS[((2 * v + 22) / 45) & 15]);
+      break;
+    case F_PRESSURE:
+      if (imperial) {
+        const int h = (v * 2953 + 5000) / 10000;  // hundredths of an inch of mercury
+        snprintf(out, size, "%s%d.%02d IN", head, h / 100, h % 100);
+      } else {
+        snprintf(out, size, "%s%d HPA", head, (v + 5) / 10);
+      }
+      break;
+    case F_VISIBILITY:
+      if (imperial) snprintf(out, size, "%s%d MI", head, (v * 621 + 5000) / 10000);
+      else snprintf(out, size, "%s%d KM", head, (v + 5) / 10);
+      break;
+    case F_COND:
+      snprintf(out, size, "%s", v >= 0 && v < (int)ARRAY_LENGTH(CONDS) ? CONDS[v] : "--");
+      break;
+    case F_TIME:
+      if (is_24h()) snprintf(out, size, "%s%02d:%02d", head, v / 60, v % 60);
+      else snprintf(out, size, "%s%d:%02d%c", head, (v / 60 + 11) % 12 + 1, v % 60, v >= 720 ? 'P' : 'A');
+      break;
+  }
 }
 
 // The text of a bezel corner: empty for nothing and for the WR badge (which is drawn); beside a
@@ -1012,90 +1157,262 @@ static void corner_string(int slot, char *out, size_t size) {
       snprintf(out, size, "%s", s_settings.corner_text[slot]);
       break;
     default:
+      if (s_settings.corner[slot] >= CORNER_WX) weather_string(wx_corner(slot), out, size);
       break;
   }
 }
 
-// Top bezel: the right text gets the width it needs (up to TOP_RIGHT_MAX), the left one the rest.
-static void draw_top_bezel(GContext *ctx) {
-  char left[24], right[24];
-  corner_string(SLOT_TOP_LEFT, left, sizeof(left));
-  corner_string(SLOT_TOP_RIGHT, right, sizeof(right));
-  int right_w = graphics_text_layout_get_content_size(
-      right, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD), GRect(0, 0, 190, 22),
-      GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
-  if (right_w > TOP_RIGHT_MAX) right_w = TOP_RIGHT_MAX;
-  draw_text(ctx, right, GRect(190 - right_w, -2, right_w, 22), GTextAlignmentRight, s_frame_text);
-  draw_text(ctx, left, GRect(10, -2, 190 - right_w - 14, 22), GTextAlignmentLeft, s_frame_text);
+// ---- Bezel text -------------------------------------------------------------------------
+// The bezels use Gothic 24 bold (capitals 14 px tall), shrunk to BEZEL_ROWS rows if that is less
+// (the system fonts have nothing between 18 and 24). Each text is drawn once in a scratch area (the
+// top strip, which is still empty then), its ink is read back from the frame buffer and re-sampled
+// one letter at a time, like draw_fitted_text does for the indicator labels: rows are dropped from
+// inside each letter (not from its bars) and so are columns (not from its stems), so strokes keep
+// their thickness. The result is kept as a bitmap and only drawn again when the text changes.
+#define BZ_CAP 14           // capital height of Gothic 24 bold
+#define BZ_SCRATCH_H 22     // rows of the top strip that are free (the last two are the case's edge)
+#define BZ_BOX_Y (-8)       // the text box's top, so that the capitals start on row 2
+#define BZ_W 176            // widest text
+#define BZ_STRIDE ((BZ_W + 7) / 8)
+#define BADGE_STRIDE 4      // a badge's two letters are at most 32 px wide
+#define BZ_KEY 24           // longest text (with its end)
+_Static_assert(BEZEL_ROWS <= BZ_CAP, "the bezel text can only be shrunk");
+_Static_assert(BZ_BOX_Y + 10 + BZ_H <= BZ_SCRATCH_H, "the scratch text must fit the free rows");
+
+typedef struct {
+  uint8_t *bits;     // BZ_H rows of `stride` bytes, 1 = ink, the first pixel in the lowest bit
+  uint8_t stride, w, rows;
+  uint32_t key;      // a hash of the text it was made from
+} BezelText;
+
+static uint8_t s_bezel_bits[SLOTS][BZ_H * BZ_STRIDE], s_badge_bits[2][BZ_H * BADGE_STRIDE];
+static BezelText s_bezel[SLOTS], s_badge[2];  // one per corner, and the two badge texts (WR, HR)
+
+static void bezel_text_init(void) {
+  for (int i = 0; i < SLOTS; i++) s_bezel[i] = (BezelText){ .bits = s_bezel_bits[i], .stride = BZ_STRIDE };
+  for (int i = 0; i < 2; i++) s_badge[i] = (BezelText){ .bits = s_badge_bits[i], .stride = BADGE_STRIDE };
+}
+
+static uint32_t text_hash(const char *text) {  // FNV-1a
+  uint32_t h = 2166136261u;
+  for (; *text; text++) h = (h ^ (uint8_t)*text) * 16777619u;
+  return h;
+}
+
+// Which column of a letter (cols[] hold the indices of its n columns, rows 0..BZ_CAP-1 count) to
+// drop when it is too wide: never the first or last, never a stem that is only two columns wide;
+// otherwise the column most like a neighbour, then the one nearest the middle.
+static int col_to_drop(const int *cols, int n) {
+  int best = n / 2, best_cost = 1 << 30;
+  for (int i = 1; i < n - 1; i++) {
+    int up = 0, down = 0, vrun = 0, vbest = 0;
+    for (int y = 0; y < BZ_CAP; y++) {
+      up += s_scratch.letter[y][cols[i]] != s_scratch.letter[y][cols[i - 1]];
+      down += s_scratch.letter[y][cols[i]] != s_scratch.letter[y][cols[i + 1]];
+      vrun = s_scratch.letter[y][cols[i]] ? vrun + 1 : 0;
+      if (vrun > vbest) vbest = vrun;
+    }
+    int same = 1;  // how many columns in a row look like this one
+    for (int dir = -1; dir <= 1; dir += 2) {
+      for (int j = i + dir; j >= 0 && j < n; j += dir) {
+        bool eq = true;
+        for (int y = 0; y < BZ_CAP && eq; y++) eq = s_scratch.letter[y][cols[j]] == s_scratch.letter[y][cols[i]];
+        if (!eq) break;
+        same++;
+      }
+    }
+    const int stem = (vbest >= 4 && same <= 2) ? 1000 : 0;
+    const int like = up < down ? up : down;
+    const int cost = stem + like * 10 + abs(2 * i - (n - 1));
+    if (cost < best_cost) { best_cost = cost; best = i; }
+  }
+  return best;
+}
+
+// Draws `text` in the scratch area, shrinks it into `bt`, and clears the scratch area again.
+static void bezel_text_render(GContext *ctx, const char *text, BezelText *bt) {
+  bt->w = bt->rows = 0;
+  bt->key = text_hash(text);
+  memset(bt->bits, 0, BZ_H * bt->stride);
+  if (!text[0]) return;
+  graphics_context_set_text_color(ctx, s_frame_text);
+  graphics_draw_text(ctx, text, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+                     GRect(0, BZ_BOX_Y, BZ_W, 30), GTextOverflowModeTrailingEllipsis,
+                     GTextAlignmentLeft, NULL);
+  GBitmap *fb = graphics_capture_frame_buffer(ctx);
+  if (!fb) return;
+
+  // The ink's rows, and which columns have any.
+  uint8_t col[BZ_W] = { 0 };
+  int top = BZ_SCRATCH_H, bottom = -1;
+  for (int y = 0; y < BZ_SCRATCH_H; y++) {
+    GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, y);
+    for (int x = 0; x < BZ_W; x++) {
+      if (row.data[x] != s_frame_text.argb) continue;
+      col[x] = 1;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (bottom >= 0) {
+    const int desc = bottom - top + 1 > BZ_CAP ? bottom - top + 1 - BZ_CAP : 0;  // rows below the capitals
+    const int out_rows = BEZEL_ROWS + (desc > BZ_H - BEZEL_ROWS ? BZ_H - BEZEL_ROWS : desc);
+    int kept = 0, prev_end = -1;
+    for (int x = 0; x < BZ_W;) {
+      if (!col[x]) { x++; continue; }
+      const int start = x;
+      while (x < BZ_W && col[x]) x++;
+      const int len = x - start;
+      if (len > BZ_MAX_LETTER) break;
+      for (int y = 0; y < out_rows - BEZEL_ROWS + BZ_CAP; y++) {  // the letter, row by row
+        GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, top + y);
+        for (int i = 0; i < len; i++) s_scratch.letter[y][i] = row.data[start + i] == s_frame_text.argb;
+      }
+
+      // Vertical: the capital rows are dropped from BZ_CAP down to BEZEL_ROWS, the rows below kept.
+      int rows[BZ_H], n = BZ_CAP;
+      for (int i = 0; i < BZ_H; i++) rows[i] = i;
+      while (n > BEZEL_ROWS) {
+        const int drop = row_to_drop(&s_scratch.letter[0][0], BZ_MAX_LETTER, rows, n, 0, len - 1);
+        for (int i = drop; i < BZ_H - 1; i++) rows[i] = rows[i + 1];
+        n--;
+      }
+      // Horizontal: the letter's width is scaled like its height.
+      int cols[BZ_MAX_LETTER], m = len;
+      for (int i = 0; i < len; i++) cols[i] = i;
+      const int want = (len * BEZEL_ROWS + BZ_CAP / 2) / BZ_CAP;
+      while (m > want && m > 2) {
+        const int drop = col_to_drop(cols, m);
+        for (int i = drop; i < m - 1; i++) cols[i] = cols[i + 1];
+        m--;
+      }
+      int gap = 0;
+      if (prev_end >= 0) {
+        gap = ((start - prev_end - 1) * BEZEL_ROWS + BZ_CAP / 2) / BZ_CAP;
+        if (gap < 1) gap = 1;
+      }
+      if (kept + gap + m > bt->stride * 8) break;
+      for (int y = 0; y < out_rows; y++) {
+        for (int i = 0; i < m; i++) {
+          if (s_scratch.letter[rows[y]][cols[i]]) bt->bits[y * bt->stride + ((kept + gap + i) >> 3)] |= 1 << ((kept + gap + i) & 7);
+        }
+      }
+      kept += gap + m;
+      prev_end = start + len - 1;
+    }
+    bt->w = kept;
+    bt->rows = out_rows;
+  }
+  graphics_release_frame_buffer(ctx, fb);
+  graphics_context_set_fill_color(ctx, s_frame);
+  graphics_fill_rect(ctx, GRect(0, 0, BZ_W, BZ_SCRATCH_H), 0, GCornerNone);
+}
+
+// The shrunk text, made again only when it is not the one kept in `bt`.
+static const BezelText *bezel_text(GContext *ctx, BezelText *bt, const char *text) {
+  if (bt->key != text_hash(text)) bezel_text_render(ctx, text, bt);
+  return bt;
+}
+
+// What a bezel row has to put on the frame buffer once its texts are made: shrunk texts and
+// footprints icons (the badges' outlines are drawn with the drawing API before that).
+typedef struct {
+  const BezelText *text;
+  int16_t x, y, max_w;
+} BezelBlit;
+typedef struct {
+  BezelBlit blit[8];
+  int16_t foot[4][2];  // top-left corners of the footprints icons
+  uint8_t blits, feet;
+} BezelOps;
+
+static void ops_text(BezelOps *ops, const BezelText *text, int x, int y, int max_w) {
+  if (text->w > 0 && max_w > 0 && ops->blits < ARRAY_LENGTH(ops->blit)) {
+    ops->blit[ops->blits++] = (BezelBlit){ text, x, y, max_w };
+  }
+}
+
+static void ops_footprints(BezelOps *ops, int x, int y) {
+  if (ops->feet < ARRAY_LENGTH(ops->foot)) {
+    ops->foot[ops->feet][0] = x;
+    ops->foot[ops->feet][1] = y;
+    ops->feet++;
+  }
 }
 
 // A badge: a small outlined box with two letters in it ("WR" water resistant, or "HR").
-static void draw_badge(GContext *ctx, int x, const char *letters) {
+static void ops_badge(GContext *ctx, BezelOps *ops, int x, int cap_y, const BezelText *letters) {
   graphics_context_set_stroke_color(ctx, s_frame_text);
-  graphics_draw_round_rect(ctx, GRect(x, BOTTOM_CAP - 3, WR_BADGE_W, 20), 3);
-  draw_bezel_text(ctx, letters, x, BOTTOM_CAP, WR_BADGE_W, GTextAlignmentCenter);
+  graphics_draw_round_rect(ctx, GRect(x, cap_y - 2, WR_BADGE_W, BEZEL_ROWS + 4), 3);
+  ops_text(ops, letters, x + (WR_BADGE_W - letters->w + 1) / 2, cap_y, WR_BADGE_W);
 }
 
-// The footprints icon, with its top-left corner at (x, y).
-static void draw_footprints(GContext *ctx, int x, int y) {
-  graphics_context_set_fill_color(ctx, s_frame_text);
-  for (int r = 0; r < FOOT_H; r++) {
-    for (int c = 0; c < FOOT_W;) {
-      if (FOOT_BITS[r * FOOT_W + c] != '#') { c++; continue; }
-      int run = 1;
-      while (c + run < FOOT_W && FOOT_BITS[r * FOOT_W + c + run] == '#') run++;
-      graphics_fill_rect(ctx, GRect(x + c, y + r, run, 1), 0, GCornerNone);
-      c += run;
-    }
+// Lays out one bezel row: the right corner gets the width it needs (up to right_max), the left
+// one the rest. A corner is a text, a badge (with its value beside it), or a steps count that
+// ends with the footprints icon. `ctx` is only used to draw the badges' outlines.
+static void layout_bezel_row(GContext *ctx, BezelOps *ops, int left_slot, int right_slot, int cap_y,
+                             int right_max, bool badges) {
+  const int slot[2] = { left_slot, right_slot };
+  char str[2][BZ_KEY];
+  const BezelText *text[2], *letters[2];
+  const char *badge[2];
+  for (int i = 0; i < 2; i++) {  // (all text is made before any of it is drawn: see above)
+    corner_string(slot[i], str[i], BZ_KEY);
+    text[i] = bezel_text(ctx, &s_bezel[slot[i]], str[i]);
+    badge[i] = badges ? corner_badge(slot[i]) : NULL;  // (the top strip is the scratch area: no outlines)
+    letters[i] = badge[i] ? bezel_text(ctx, &s_badge[badge[i][0] == 'H'], badge[i]) : NULL;
+  }
+  const int foot_y = cap_y + (BEZEL_ROWS - FOOT_H) / 2;
+  const int right_icon_w = corner_has_icon(right_slot) ? FOOT_W + 2 : 0;
+  int right_w = badge[1] ? WR_BADGE_W + (str[1][0] ? BADGE_GAP + text[1]->w : 0)
+                         : text[1]->w + right_icon_w;
+  if (right_w > right_max) right_w = right_max;
+  const int right_x = 190 - right_w;
+  if (badge[1]) {
+    ops_badge(ctx, ops, right_x, cap_y, letters[1]);
+    ops_text(ops, text[1], right_x + WR_BADGE_W + BADGE_GAP, cap_y, right_w - WR_BADGE_W - BADGE_GAP);
+  } else {
+    ops_text(ops, text[1], right_x, cap_y, right_w - right_icon_w);
+    if (right_icon_w) ops_footprints(ops, 190 - FOOT_W, foot_y);
+  }
+  const int left_room = right_x - 10 - 8;  // from x = 10 to the right corner
+  if (badge[0]) {
+    ops_badge(ctx, ops, 10, cap_y, letters[0]);
+    ops_text(ops, text[0], 10 + WR_BADGE_W + BADGE_GAP, cap_y, left_room - WR_BADGE_W - BADGE_GAP);
+  } else {
+    const int w = text[0]->w < left_room ? text[0]->w : left_room;
+    ops_text(ops, text[0], 10, cap_y, w);
+    if (corner_has_icon(left_slot) && left_room - w >= FOOT_W + 2) ops_footprints(ops, 10 + w + 2, foot_y);
   }
 }
 
-// Bottom bezel: like the top one, with badges (the WR badge, or HR followed by the heart rate)
-// and the footprints icon (after the step count) as possible parts of a corner.
-static void draw_bottom_bezel(GContext *ctx) {
-  const GFont font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  const char *left_badge = corner_badge(SLOT_BOTTOM_LEFT);
-  const char *right_badge = corner_badge(SLOT_BOTTOM_RIGHT);
-  const bool left_icon = corner_has_icon(SLOT_BOTTOM_LEFT);
-  const bool right_icon = corner_has_icon(SLOT_BOTTOM_RIGHT);
-  char left[24], right[24];
-  corner_string(SLOT_BOTTOM_LEFT, left, sizeof(left));
-  corner_string(SLOT_BOTTOM_RIGHT, right, sizeof(right));
-  const int text_w = graphics_text_layout_get_content_size(
-      right, font, GRect(0, 0, 190, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentRight).w + 4;
-  int right_w = right_badge ? WR_BADGE_W + (right[0] ? BADGE_GAP + text_w : 0)
-                            : right_icon ? text_w + FOOT_W : text_w;
-  if (right_w > BOTTOM_RIGHT_MAX) right_w = BOTTOM_RIGHT_MAX;
-  if (right_badge) {
-    const int x = 190 - right_w;  // the badge and its value, as one group against the right edge
-    draw_badge(ctx, x, right_badge);
-    if (right[0]) {
-      draw_bezel_text(ctx, right, x + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP,
-                      right_w - WR_BADGE_W - BADGE_GAP, GTextAlignmentLeft);
+static void draw_bezels(GContext *ctx) {
+  BezelOps ops = { .blits = 0, .feet = 0 };
+  layout_bezel_row(ctx, &ops, SLOT_TOP_LEFT, SLOT_TOP_RIGHT, TOP_CAP_Y, TOP_RIGHT_MAX, false);
+  layout_bezel_row(ctx, &ops, SLOT_BOTTOM_LEFT, SLOT_BOTTOM_RIGHT, BOTTOM_CAP_Y, BOTTOM_RIGHT_MAX, true);
+
+  GBitmap *fb = graphics_capture_frame_buffer(ctx);
+  if (!fb) return;
+  for (int i = 0; i < ops.blits; i++) {
+    const BezelBlit *b = &ops.blit[i];
+    const int w = b->text->w < b->max_w ? b->text->w : b->max_w;
+    for (int r = 0; r < b->text->rows; r++) {
+      GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, b->y + r);
+      for (int c = 0; c < w; c++) {
+        if ((b->text->bits[r * b->text->stride + (c >> 3)] >> (c & 7)) & 1) row.data[b->x + c] = s_frame_text.argb;
+      }
     }
-  } else if (right_icon) {
-    draw_bezel_text(ctx, right, 190 - right_w, BOTTOM_CAP, right_w - FOOT_W, GTextAlignmentLeft);
-    draw_footprints(ctx, 190 - FOOT_W, BOTTOM_CAP);
-  } else {
-    draw_bezel_text(ctx, right, 190 - right_w, BOTTOM_CAP, right_w, GTextAlignmentRight);
   }
-  const int left_room = 190 - right_w - 14;  // from x = 10 to the right corner
-  if (left_badge) {
-    draw_badge(ctx, 10, left_badge);
-    const int avail = left_room - WR_BADGE_W - BADGE_GAP;
-    if (left[0] && avail > 0) {
-      draw_bezel_text(ctx, left, 10 + WR_BADGE_W + BADGE_GAP, BOTTOM_CAP, avail, GTextAlignmentLeft);
+  for (int i = 0; i < ops.feet; i++) {  // the footprints, slanted by 20 degrees (tan = 0.364): the
+    for (int r = 0; r < FOOT_H; r++) {  // top row leans right, the bottom row left
+      const int dx = ((FOOT_H / 2 - r) * 364 + (r < FOOT_H / 2 ? 500 : -500)) / 1000;
+      GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, ops.foot[i][1] + r);
+      for (int c = 0; c < FOOT_BW; c++) {
+        if ((FOOT_BITS[r] >> c) & 1) row.data[ops.foot[i][0] + 2 + c + dx] = s_frame_text.argb;
+      }
     }
-  } else if (left_icon) {
-    const int lw = graphics_text_layout_get_content_size(
-        left, font, GRect(0, 0, 190, 30), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft).w + 4;
-    const int text_room = left_room - FOOT_W;
-    const int w = lw < text_room ? lw : text_room;
-    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, w, GTextAlignmentLeft);
-    if (text_room > 0) draw_footprints(ctx, 10 + w, BOTTOM_CAP);
-  } else {
-    draw_bezel_text(ctx, left, 10, BOTTOM_CAP, left_room, GTextAlignmentLeft);
   }
+  graphics_release_frame_buffer(ctx, fb);
 }
 
 // SIG lights up while a sound (not just a vibration) is set as the hourly chime and the
@@ -1170,8 +1487,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 
   // Text goes through the regular text API, so it comes after the framebuffer
   // is released.
-  draw_top_bezel(ctx);
-  draw_bottom_bezel(ctx);
+  draw_bezels(ctx);
   draw_indicator_labels(ctx);
   draw_dst_label(ctx);
 }
@@ -1182,7 +1498,8 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 static void request_weather(void) {
   DictionaryIterator *iter;
   if (app_message_outbox_begin(&iter) != APP_MSG_OK) return;
-  dict_write_uint8(iter, MESSAGE_KEY_RequestWeather, 1);
+  dict_write_uint8(iter, MESSAGE_KEY_RequestWeather, s_settings.weather_refresh);  // the phone uses it to throttle
+  dict_write_uint8(iter, MESSAGE_KEY_RequestAQI, wx_source_used(SRC_AIR) ? 1 : 0);
   app_message_outbox_send();
 }
 
@@ -1201,8 +1518,18 @@ static void send_watch_prefs(void) {
 // Each request wakes the phone app for a location fix and a web request.
 static void refresh_weather_if_needed(void) {
   // The temperature is on screen unless the seconds are always shown.
-  if ((s_settings.show_seconds && !s_settings.seconds_on_shake) || !s_connected) return;
-  if (s_weather.updated != 0 && time(NULL) - s_weather.updated < (WEATHER_REFRESH_MIN - 5) * 60) return;
+  const bool temp_shown = !(s_settings.show_seconds && !s_settings.seconds_on_shake);
+  if (!(temp_shown || wx_source_used(SRC_WX) || wx_source_used(SRC_AIR)) || !s_connected) return;
+  // A reading a corner needs that the last answer lacked (the corner was just switched on) is asked for at once.
+  bool missing = false;
+  for (int i = 0; i < SLOTS; i++) {
+    const WxCorner *c = wx_corner(i);
+    if (!c) continue;
+    const bool air = c->src == SRC_AIR;
+    if ((air ? s_weather.aqi_updated : s_weather.updated) == 0 ||
+        (air ? s_weather.aq[c->fmt == F_AQI && s_settings.aqi_eu ? AQ_EU : c->idx] : s_weather.wx[c->idx]) == WX_NONE) missing = true;
+  }
+  if (!missing && s_weather.updated != 0 && time(NULL) - s_weather.updated < (weather_refresh_min() - 5) * 60) return;
   request_weather();
 }
 
@@ -1260,15 +1587,19 @@ static void tick_handler(struct tm *now, TimeUnits changed) {
   if (changed & MINUTE_UNIT) {
     if (corner_used(CORNER_STEPS)) update_steps();
     if (corner_used(CORNER_DISTANCE)) update_distance();
-    if (now->tm_min % WEATHER_REFRESH_MIN == 0) refresh_weather_if_needed();
+    if ((now->tm_hour * 60 + now->tm_min) % weather_refresh_min() == 0) refresh_weather_if_needed();
   }
   layer_mark_dirty(s_canvas);
   if (now->tm_min == 0 && now->tm_sec == 0) play_chime(false);
 }
 
+// The charge level is only on screen while a corner shows it; the charging indicator
+// (CHG / FULL) needs a redraw only when the charger state changes.
 static void battery_handler(BatteryChargeState state) {
+  const bool redraw = state.is_charging != s_battery.is_charging || state.is_plugged != s_battery.is_plugged ||
+                      (state.charge_percent != s_battery.charge_percent && corner_used(CORNER_BATTERY));
   s_battery = state;
-  layer_mark_dirty(s_canvas);
+  if (redraw) layer_mark_dirty(s_canvas);
 }
 
 static void play_vibe(uint8_t pattern) {
@@ -1303,7 +1634,7 @@ static void lcd_second_beep(void *context) {
 }
 
 // Tunes are built into one buffer that stays valid while the speaker plays it.
-#define TUNE_MAX 24  // the longest tune needs 15 notes
+#define TUNE_MAX 16  // the longest tune needs 15 notes
 static SpeakerNote s_tune[TUNE_MAX];
 static uint32_t s_tune_len;
 
@@ -1460,18 +1791,26 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   bool play_preview = false;
 
   if (dict_find(iter, MESSAGE_KEY_RequestPrefs)) send_watch_prefs();
-  if ((t = dict_find(iter, MESSAGE_KEY_Temp))) {
-    const int16_t temp = (int16_t)tuple_int(t);
+  if ((t = dict_find(iter, MESSAGE_KEY_WeatherData)) && t->length >= WX_COUNT * 2) {
     const time_t now = time(NULL);
-    const bool changed = temp != s_weather.temp;
-    s_weather.temp = temp;
+    int16_t before[WX_COUNT];
+    memcpy(before, s_weather.wx, sizeof(before));
+    memcpy(s_weather.wx, t->value->data, sizeof(s_weather.wx));  // little-endian 16-bit numbers, like the watch
     s_weather.updated = now;
-    // Flash writes cost energy: save when the value changed, otherwise about hourly (the
-    // saved timestamp only has to be good enough for the 3 hour "too old" limit).
-    if (changed || now - s_weather_saved >= 60 * 60) {
+    layer_mark_dirty(s_canvas);
+    // Flash writes cost energy: save when a reading changed, otherwise about hourly (the saved
+    // time only has to be good enough for the "too old" limit).
+    if (memcmp(before, s_weather.wx, sizeof(before)) != 0 || now - s_weather_saved >= 60 * 60) {
       persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
       s_weather_saved = now;
     }
+  }
+  // The air quality comes in a message of its own, a little after the weather.
+  if ((t = dict_find(iter, MESSAGE_KEY_AirData)) && t->length >= AQ_COUNT * 2) {
+    memcpy(s_weather.aq, t->value->data, sizeof(s_weather.aq));
+    s_weather.aqi_updated = time(NULL);
+    persist_write_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+    layer_mark_dirty(s_canvas);
   }
   // Time & date
   if ((t = dict_find(iter, MESSAGE_KEY_TimeFormat))) {
@@ -1525,7 +1864,8 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
     if ((t = dict_find(iter, CORNER_KEYS[i]))) {
       s_settings.corner[i] = CORNER_NOTHING;
       for (int k = 0; k < CORNER_TYPES; k++) {
-        if (strcmp(t->value->cstring, CORNER_NAMES[k]) == 0) s_settings.corner[i] = k;
+        const char *name = k < CORNER_WX ? CORNER_NAMES[k] : WX_CORNERS[k - CORNER_WX].name;
+        if (strcmp(t->value->cstring, name) == 0) s_settings.corner[i] = k;
       }
       settings_changed = true;
     }
@@ -1533,6 +1873,15 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
       copy_upper(s_settings.corner_text[i], sizeof(s_settings.corner_text[i]), t->value->cstring);
       settings_changed = true;
     }
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_WeatherUnits))) {
+    const char *u = t->value->cstring;
+    s_settings.weather_units = strcmp(u, "metric") == 0 ? WUNITS_METRIC : strcmp(u, "imperial") == 0 ? WUNITS_IMPERIAL : WUNITS_AUTO;
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_AQIScale))) {
+    s_settings.aqi_eu = strcmp(t->value->cstring, "eu") == 0;
+    settings_changed = true;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_DistanceUnit))) {
     const char *d = t->value->cstring;
@@ -1554,6 +1903,11 @@ static void inbox_handler(DictionaryIterator *iter, void *context) {
   }
   if ((t = dict_find(iter, MESSAGE_KEY_Ghosts))) {
     s_settings.ghosts = tuple_int(t);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_WeatherRefresh))) {
+    const int minutes = atoi(t->value->cstring);
+    s_settings.weather_refresh = (minutes >= 30 && minutes <= 720) ? minutes / 10 : WEATHER_REFRESH_DEFAULT / 10;
     settings_changed = true;
   }
   if ((t = dict_find(iter, MESSAGE_KEY_ButtonMarkers))) {
@@ -1647,6 +2001,7 @@ static void init(void) {
     .chime_quiet = true,
     .chime_volume = CHIME_VOLUME_DEFAULT,
     .seconds_burst_s = SECONDS_BURST_DEFAULT_S,
+    .weather_refresh = WEATHER_REFRESH_DEFAULT / 10,
   };
   persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));
   for (int i = 0; i < SLOTS; i++) {
@@ -1658,11 +2013,17 @@ static void init(void) {
   if (s_settings.seconds_on_shake > 1) s_settings.seconds_on_shake = 0;
   if (s_settings.hour_no_zero > 1) s_settings.hour_no_zero = 0;
   if (s_settings.button_markers > 1) s_settings.button_markers = 0;
+  if (s_settings.aqi_eu > 1) s_settings.aqi_eu = 0;
+  if (s_settings.weather_units > WUNITS_IMPERIAL) s_settings.weather_units = WUNITS_AUTO;
+  if (s_settings.weather_refresh < 3 || s_settings.weather_refresh > 72) s_settings.weather_refresh = WEATHER_REFRESH_DEFAULT / 10;
   if (s_settings.date_pad > PAD_BOTH_BLANK) s_settings.date_pad = PAD_ZERO;
   if (s_settings.seconds_burst_s < SECONDS_BURST_MIN_S || s_settings.seconds_burst_s > SECONDS_BURST_MAX_S) {
     s_settings.seconds_burst_s = SECONDS_BURST_DEFAULT_S;
   }
+  for (int i = 0; i < WX_COUNT; i++) s_weather.wx[i] = WX_NONE;
+  for (int i = 0; i < AQ_COUNT; i++) s_weather.aq[i] = WX_NONE;
   persist_read_data(WEATHER_KEY, &s_weather, sizeof(s_weather));
+  bezel_text_init();
   apply_theme();
   apply_backlight();
 
@@ -1688,8 +2049,8 @@ static void init(void) {
   app_message_register_inbox_received(inbox_handler);
   // The inbox must hold a full settings Save: about 230 bytes with plain text and
   // over 400 with emoji in the three custom texts.
-  // The outbox only ever carries the one-byte weather request.
-  app_message_open(512, dict_calc_buffer_size(1, sizeof(uint8_t)));
+  // The outbox only ever carries the two one-byte values of the weather request.
+  app_message_open(512, dict_calc_buffer_size(2, sizeof(uint8_t), sizeof(uint8_t)));
 }
 
 static void deinit(void) {

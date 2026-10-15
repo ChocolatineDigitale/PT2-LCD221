@@ -76,15 +76,17 @@ def main(font_path):
         "#pragma once",
         "",
     ]
+    rows = []
     for seg, poly in polys.items():
         norm = [(round((x - x0) / (x1 - x0) * 1000), round((y1 - y) / (y1 - y0) * 1000))
                 for x, y in poly]
-        flat = ", ".join("%d, %d" % p for p in norm)
-        lines.append("static const int16_t SEG_POLY_%s[] = { %s };" % (seg, flat))
+        flat = [v for pt in norm for v in pt] + [0] * (16 - 2 * len(norm))  # padded to 8 points
+        rows.append("  { %s },  // %s" % (", ".join(str(v) for v in flat), seg))
     lines += [
-        "",
-        "static const int16_t *const SEG_POLYS[7] = {",
-        "  SEG_POLY_A, SEG_POLY_B, SEG_POLY_C, SEG_POLY_D, SEG_POLY_E, SEG_POLY_F, SEG_POLY_G,",
+        "// One row per segment A..G, as 0..1000 (x, y) pairs; SEG_POLY_LEN says how many points count.",
+        "// (A plain 2-D array: a table of pointers would have to be copied into RAM.)",
+        "static const int16_t SEG_POLYS[7][16] = {",
+    ] + rows + [
         "};",
         "static const uint8_t SEG_POLY_LEN[7] = { %s };"
         % ", ".join(str(len(polys[s])) for s in "ABCDEFG"),

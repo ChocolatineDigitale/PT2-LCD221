@@ -1,8 +1,10 @@
 {
   "name": "lcd-221",
   "author": "Kicou",
-  "version": "1.3.0",
-  "keywords": ["pebble-app"],
+  "version": "1.4.0",
+  "keywords": [
+    "pebble-app"
+  ],
   "private": true,
   "license": "MIT",
   "dependencies": {
@@ -13,14 +15,22 @@
     "uuid": "3d82e92e-32bf-42f7-b032-74baaf671d11",
     "sdkVersion": "3",
     "enableMultiJS": true,
-    "targetPlatforms": ["emery"],
+    "targetPlatforms": [
+      "emery"
+    ],
     "watchapp": {
       "watchface": true
     },
-    "capabilities": ["configurable", "location", "health"],
+    "capabilities": [
+      "configurable",
+      "location",
+      "health"
+    ],
     "messageKeys": [
-      "Temp",
+      "WeatherData",
+      "AirData",
       "RequestWeather",
+      "RequestAQI",
       "RequestPrefs",
       "WatchPrefs",
       "TimeFormat",
@@ -32,6 +42,9 @@
       "SecondsDuration",
       "TempUnit",
       "DistanceUnit",
+      "WeatherUnits",
+      "AQIScale",
+      "WeatherRefresh",
       "TopLeft",
       "TopLeftText",
       "TopRight",

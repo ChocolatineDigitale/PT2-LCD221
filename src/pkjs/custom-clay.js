@@ -19,6 +19,45 @@ module.exports = function () {
     corners.forEach(function (pair) { item(pair[0]).on('change', syncCorners); });
     syncCorners();
 
+    // A little picture in front of each corner's label: the watch's outline with that corner marked.
+    var corner_marks = { TopLeft: [3, 3], TopRight: [10, 3], BottomLeft: [3, 15], BottomRight: [10, 15] };
+    Object.keys(corner_marks).forEach(function (key) {
+      var el = item(key).$element && item(key).$element[0];
+      var label = el && el.querySelector('.label');
+      if (!label) return;
+      var pos = corner_marks[key];
+      var icon = document.createElement('span');
+      icon.style.cssText = 'display:inline-block;vertical-align:middle;margin-right:8px;line-height:0';
+      icon.innerHTML = '<svg width="18" height="22" viewBox="0 0 18 22" aria-hidden="true">' +
+        '<rect x="0.5" y="0.5" width="17" height="21" rx="3" fill="none" stroke="currentColor" opacity="0.6"/>' +
+        '<rect x="' + pos[0] + '" y="' + pos[1] + '" width="5" height="4" fill="currentColor"/></svg>';
+      label.insertBefore(icon, label.firstChild);
+    });
+
+    // Apart from "Custom text" and "Nothing", a kind of information can only be in one corner:
+    // the options already taken by another corner are greyed out in the others.
+    function exclusive(v) { return v !== 'text' && v !== 'none'; }
+    function selectOf(it) { return it.$manipulatorTarget && it.$manipulatorTarget[0]; }
+    var seen = {};
+    corners.forEach(function (pair) {  // a saved duplicate (older versions): the later corner becomes "Nothing"
+      var v = item(pair[0]).get();
+      if (exclusive(v) && seen[v]) item(pair[0]).set('none'); else seen[v] = true;
+    });
+    function syncExclusive() {
+      var taken = {};
+      corners.forEach(function (pair) { var v = item(pair[0]).get(); if (exclusive(v)) taken[v] = pair[0]; });
+      corners.forEach(function (pair) {
+        var sel = selectOf(item(pair[0]));
+        if (!sel) return;
+        for (var i = 0; i < sel.options.length; i++) {
+          var o = sel.options[i];
+          o.disabled = !!(exclusive(o.value) && taken[o.value] && taken[o.value] !== pair[0]);
+        }
+      });
+    }
+    corners.forEach(function (pair) { item(pair[0]).on('change', syncExclusive); });
+    syncExclusive();
+
     // The hour's leading zero only matters in the 24-hour format ("Follow watch" may be either).
     var timeFormat = item('TimeFormat'), hourZero = item('TimeZero');
     function syncHourZero() { if (timeFormat.get() === '12') hourZero.hide(); else hourZero.show(); }
@@ -143,9 +182,9 @@ module.exports = function () {
         ctx.setTransform(2, 0, 0, 2, 0, 0);
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = frame; ctx.fillRect(0, 0, 200, 228);
-        ctx.fillStyle = '#000'; ctx.fillRect(0, 22, 200, 180);
-        ctx.fillStyle = lcd; ctx.fillRect(0, 24, 200, 176);
-        if (inv && !silver) { ctx.fillStyle = '#555'; ctx.fillRect(0, 23, 200, 1); ctx.fillRect(0, 200, 200, 1); }
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 22, 200, 184);
+        ctx.fillStyle = lcd; ctx.fillRect(0, 24, 200, 180);
+        if (inv && !silver) { ctx.fillStyle = '#555'; ctx.fillRect(0, 23, 200, 1); ctx.fillRect(0, 204, 200, 1); }
         // button markers (optional): red bars along the LCD edges, one on the left and three on
         // the right, 5 px wide with the inside corners rounded, as on the watch
         if (get('ButtonMarkers', false)) {
@@ -157,7 +196,7 @@ module.exports = function () {
               ctx.fillRect(innerRight ? x : x + 5 - w, cy - 16 + r, w, 1);
             }
           };
-          marker(0, 44, true); marker(195, 44, false); marker(195, 117, false); marker(195, 190, false);
+          marker(0, 44, true); marker(195, 44, false); marker(195, 119, false); marker(195, 194, false);
         }
 
         function rect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
@@ -236,59 +275,90 @@ module.exports = function () {
         if (twelve === '12') { hour = hour % 12; if (hour === 0) hour = 12; }
         var tens = (hour >= 10 || (twelve === '24' && get('TimeZero', true))) ? Math.floor(hour / 10) : -1;
         if (twelve === '12') {
-          seg(6, 76, 35, 70, tens === 1 ? 0x06 : 0, 0x06);
-          dots(7, 74, PM_BITS, 11, 14, 1, 1, 1, 1, pm);
+          seg(6, 80, 35, 70, tens === 1 ? 0x06 : 0, 0x06);
+          dots(7, 78, PM_BITS, 11, 14, 1, 1, 1, 1, pm);
         } else {
-          digit(6, 76, 35, 70, tens);
+          digit(6, 80, 35, 70, tens);
         }
-        digit(49, 76, 35, 70, hour % 10);
-        rect(93 + (70 - 25) * slant, 76 + 25 - 3, 7, 7, ink);
-        rect(93 + (70 - 49) * slant, 76 + 49 - 3, 7, 7, ink);
-        digit(108, 76, 35, 70, Math.floor(d.getMinutes() / 10));
-        digit(153, 76, 35, 70, d.getMinutes() % 10);
-        rect(0, 154, 200, 2, ink); rect(110, 154, 2, 46, ink);
+        digit(49, 80, 35, 70, hour % 10);
+        rect(93 + (70 - 25) * slant, 80 + 25 - 3, 7, 7, ink);
+        rect(93 + (70 - 49) * slant, 80 + 49 - 3, 7, 7, ink);
+        digit(108, 80, 35, 70, Math.floor(d.getMinutes() / 10));
+        digit(153, 80, 35, 70, d.getMinutes() % 10);
+        rect(0, 158, 200, 2, ink); rect(110, 158, 2, 46, ink);
 
         // Date
         var first = d.getDate(), second = d.getMonth() + 1;
         if (get('DateFormat', 'DM') === 'MD') { first = d.getMonth() + 1; second = d.getDate(); }
         var pad = get('DatePadding', 'zero');
-        digit(19, 170, 15, 26, (first >= 10 || pad === 'zero') ? Math.floor(first / 10) : -1);
-        digit(38, 170, 15, 26, first % 10);
-        seg(56, 170, 8, 26, 0x40, 0x40);
-        digit(67, 170, 15, 26, (second >= 10 || pad !== 'both') ? Math.floor(second / 10) : -1);
-        digit(86, 170, 15, 26, second % 10);
+        digit(19, 174, 15, 26, (first >= 10 || pad === 'zero') ? Math.floor(first / 10) : -1);
+        digit(38, 174, 15, 26, first % 10);
+        seg(56, 174, 8, 26, 0x40, 0x40);
+        digit(67, 174, 15, 26, (second >= 10 || pad !== 'both') ? Math.floor(second / 10) : -1);
+        digit(86, 174, 15, 26, second % 10);
         // DST label
         ctx.save(); ctx.font = 'bold 11px "DejaVu Sans Condensed", Arial, sans-serif';
         var dst = usesDst(d); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-        if (dst || ghosts) { ctx.fillStyle = dst ? ink : ghost; ctx.fillText('DST', 5, 166); }
+        if (dst || ghosts) { ctx.fillStyle = dst ? ink : ghost; ctx.fillText('DST', 5, 170); }
         ctx.restore();
 
         // Right box: the seconds, or (also while idle in the shake mode) the temperature
         var seconds = get('RightBox', 'temperature') === 'seconds' && get('SecondsMode', 'always') === 'always';
         if (seconds) {
-          digit(131, 160, 22, 36, Math.floor(d.getSeconds() / 10));
-          digit(156, 160, 22, 36, d.getSeconds() % 10);
+          digit(131, 164, 22, 36, Math.floor(d.getSeconds() / 10));
+          digit(156, 164, 22, 36, d.getSeconds() % 10);
         } else {
           var unit = get('TempUnit', 'auto');
           var f = unit === 'F' || (unit === 'auto' && imperialRegion());
           var t = f ? 63 : 17;
-          seg(114, 160, 16, 36, 0, 0x40);
-          seg(105, 160, 22, 36, 0, 0x06);
-          digit(132, 160, 22, 36, Math.floor(t / 10));
-          digit(157, 160, 22, 36, t % 10);
+          seg(114, 164, 16, 36, 0, 0x40);
+          seg(105, 164, 22, 36, 0, 0x06);
+          digit(132, 164, 22, 36, Math.floor(t / 10));
+          digit(157, 164, 22, 36, t % 10);
           var ring = '..###..' + '.#####.' + '##...##' + '##...##' + '##...##' + '.#####.' + '..###..';
-          dots(183 + 32 * slant, 160, ring, 7, 7, 1, 1, 1, 1, true);
+          dots(183 + 32 * slant, 164, ring, 7, 7, 1, 1, 1, 1, true);
         }
 
         // Bezel corners
         var imperial = get('DistanceUnit', 'auto');
         var miles = imperial === 'mi' || (imperial === 'auto' && imperialRegion());
+        var wu = get('WeatherUnits', 'auto');
+        var wmiles = wu === 'imperial' || (wu === 'auto' && imperialRegion());
+        var tu = get('TempUnit', 'auto'), tf = tu === 'F' || (tu === 'auto' && imperialRegion());
+        function tc(c) { return Math.round(tf ? c * 9 / 5 + 32 : c); }
         function corner(slot, kind, text) {
           switch (kind) {
             case 'battery': return 'BATT 100%';
             case 'steps': return '8,432 STEPS';
             case 'distance': return miles ? '4.0 MI' : '6.4 KM';
             case 'hr': return 'HR 72';
+            case 'uv': return 'UV 5.2';
+            case 'uvmax': return 'UV MAX 8';
+            case 'humidity': return 'HUM 63%';
+            case 'chance': return 'RAIN 40%';
+            case 'cloud': return 'CLOUD 40%';
+            case 'aqi': return 'AQI ' + (get('AQIScale', 'us') === 'eu' ? '18' : '42');
+            case 'pm25': return 'PM2.5 5';
+            case 'pm10': return 'PM10 12';
+            case 'ozone': return 'O3 62';
+            case 'no2': return 'NO2 10';
+            case 'so2': return 'SO2 4';
+            case 'co': return 'CO 207';
+            case 'dust': return 'DUST 0';
+            case 'wind': return wmiles ? '8 MPH' : '12 KM/H';
+            case 'gust': return wmiles ? 'G 15 MPH' : 'G 25 KM/H';
+            case 'winddir': return 'NW';
+            case 'rain': return wmiles ? '0.01 IN' : '0.2 MM';
+            case 'snowfall': return wmiles ? 'SNOW 0.47 IN' : 'SNOW 1.2 CM';
+            case 'snowdepth': return wmiles ? 'DEPTH 2 IN' : 'DEPTH 5 CM';
+            case 'pressure': return wmiles ? '29.97 IN' : '1015 HPA';
+            case 'visibility': return wmiles ? 'VIS 6 MI' : 'VIS 10 KM';
+            case 'cond': return 'PARTLY';
+            case 'feels': return 'FEELS ' + tc(14);
+            case 'dew': return 'DEW ' + tc(9);
+            case 'hilo': return 'H ' + tc(21) + ' L ' + tc(12);
+            case 'sunrise': return twelve === '24' ? 'SR 07:10' : 'SR 7:10A';
+            case 'sunset': return twelve === '24' ? 'SS 18:08' : 'SS 6:08P';
             case 'text': return String(text || '').toUpperCase();
             default: return '';
           }
@@ -297,62 +367,71 @@ module.exports = function () {
         var bot = [get('BottomLeft', 'wr'), get('BottomRight', 'text')];
         var topText = [get('TopLeftText', ''), get('TopRightText', '')];
         var botText = [get('BottomLeftText', ''), get('BottomRightText', '')];
+        // The bezel text is drawn in DejaVu Sans Condensed Bold, squeezed to the width of the watch's
+        // Gothic 24 bold (about 0.82 of it).
+        var SQUEEZE = 0.82;
+        function mw(text) { return ctx.measureText(text).width * SQUEEZE; }
+        function put(text, x, baseline, align) {
+          ctx.save(); ctx.translate(x, baseline); ctx.scale(SQUEEZE, 1);
+          ctx.textAlign = align; ctx.fillStyle = frameText; ctx.fillText(text, 0, 0);
+          ctx.restore();
+        }
         function fit(text, maxw) {
-          if (ctx.measureText(text).width <= maxw) return text;
-          while (text.length > 1 && ctx.measureText(text + '...').width > maxw) text = text.slice(0, -1);
+          if (mw(text) <= maxw) return text;
+          while (text.length > 1 && mw(text + '...') > maxw) text = text.slice(0, -1);
           return text + '...';
         }
         // A bottom corner can be a badge: "WR", or "HR" followed by the heart rate.
         function info(kind, text, bottom) {
           if (kind === 'wr') return { badge: 'WR', text: '' };
           if (kind === 'hr' && bottom) return { badge: 'HR', text: '72' };
-          if (kind === 'steps' && bottom) return { badge: null, text: '8,432', icon: true };
+          if (kind === 'steps') return { badge: null, text: '8,432', icon: true };
           return { badge: null, text: corner(0, kind, text) };
         }
-        // The footprints icon (the steps' symbol in the bottom bezel), 15 x 13 dots.
-        var FOOT = ['.####..........','######.........','######.........','######.........','.####.....####.','.........######','.####....######','.####....######','..##......####.','...............','..........####.','..........####.','...........##..'];
+        // The footprints icon (the steps' symbol), 12 x 13 dots slanted by 20 degrees: 16 px wide.
+        var FOOT = ['.###........','####........','####........','####........','.###....###.','.......#####','.###...#####','.###...#####','..#.....###.','............','.......###..','.......###..','........#...'];
         function footprints(x, y) {
           ctx.fillStyle = frameText;
-          for (var r = 0; r < FOOT.length; r++) for (var c = 0; c < 15; c++) {
-            if (FOOT[r].charAt(c) === '#') ctx.fillRect(x + c, y + r, 1, 1);
+          for (var r = 0; r < FOOT.length; r++) {
+            var t = (6 - r) * 0.364, dx = Math.trunc(t + (t > 0 ? 0.5 : -0.5));
+            for (var c = 0; c < 12; c++) {
+              if (FOOT[r].charAt(c) === '#') ctx.fillRect(x + 2 + c + dx, y + r, 1, 1);
+            }
           }
         }
         function row(kinds, texts, font, baseline, bottom) {
           ctx.font = font; ctx.fillStyle = frameText; ctx.textBaseline = 'alphabetic';
           var left = info(kinds[0], texts[0], bottom), right = info(kinds[1], texts[1], bottom);
-          var textw = ctx.measureText(right.text).width + 4;
-          var rw = right.badge ? 30 + (right.text ? 4 + textw : 0) : (right.icon ? textw + 15 : textw);
+          var textw = mw(right.text) + 2;
+          var rw = right.badge ? 28 + (right.text ? 4 + textw : 0) : (right.icon ? textw + 16 : textw);
           rw = Math.min(rw, bottom ? 108 : 104);
           if (right.badge) {
             badge(190 - rw, baseline, right.badge);
-            if (right.text) { ctx.textAlign = 'left'; ctx.fillStyle = frameText; ctx.fillText(right.text, 190 - rw + 34, baseline); }
+            if (right.text) put(right.text, 190 - rw + 32, baseline, 'left');
           } else if (right.icon) {
-            ctx.textAlign = 'left'; ctx.fillText(right.text, 190 - rw, baseline); footprints(190 - 15, 208);
-          } else { ctx.textAlign = 'right'; ctx.fillText(fit(right.text, rw), 190, baseline); }
-          var room = 190 - rw - 14;
+            put(right.text, 190 - rw, baseline, 'left'); footprints(190 - 16, bottom ? 210 : 5);
+          } else { put(fit(right.text, rw), 190, baseline, 'right'); }
+          var room = 190 - rw - 18;
           if (left.badge) {
             badge(10, baseline, left.badge);
-            if (left.text) { ctx.textAlign = 'left'; ctx.fillStyle = frameText; ctx.fillText(fit(left.text, room - 34), 44, baseline); }
+            if (left.text) put(fit(left.text, room - 32), 42, baseline, 'left');
           } else if (left.icon) {
-            var lw = Math.min(ctx.measureText(left.text).width + 4, room - 15);
-            ctx.textAlign = 'left'; ctx.fillText(left.text, 10, baseline); footprints(10 + lw, 208);
-          } else { ctx.textAlign = 'left'; ctx.fillText(fit(left.text, room), 10, baseline); }
+            var lw = Math.min(mw(left.text), room - 16);
+            put(left.text, 10, baseline, 'left'); footprints(10 + lw + 2, bottom ? 210 : 5);
+          } else { put(fit(left.text, room), 10, baseline, 'left'); }
         }
         function badge(x, baseline, letters) {
           ctx.strokeStyle = frameText; ctx.lineWidth = 1;
-          // a rounded outline like the watch's (30x20, radius 3), drawn with arcs
-          var l = x + 0.5, t = 205.5, r = x + 29.5, b = 224.5, rad = 3;
+          // a rounded outline like the watch's (28x18, radius 3), drawn with arcs
+          var l = x + 0.5, t = 208.5, r = x + 27.5, b = 225.5, rad = 3;
           ctx.beginPath(); ctx.moveTo(l + rad, t); ctx.lineTo(r - rad, t); ctx.arcTo(r, t, r, t + rad, rad);
           ctx.lineTo(r, b - rad); ctx.arcTo(r, b, r - rad, b, rad); ctx.lineTo(l + rad, b);
           ctx.arcTo(l, b, l, b - rad, rad); ctx.lineTo(l, t + rad); ctx.arcTo(l, t, l + rad, t, rad);
           ctx.closePath(); ctx.stroke();
-          // the watch's letters are narrower than the preview's font: squeeze them to fit the box
-          ctx.save(); ctx.translate(x + 15, baseline); ctx.scale(0.74, 1);
-          ctx.textAlign = 'center'; ctx.fillStyle = frameText; ctx.fillText(letters, 0, 0);
-          ctx.restore();
+          put(letters, x + 14, baseline, 'center');
         }
-        row(top, topText, 'bold 14px "DejaVu Sans Condensed", Arial, sans-serif', 16, false);
-        row(bot, botText, 'bold 19px "DejaVu Sans Condensed", Arial, sans-serif', 222, true);
+        row(top, topText, 'bold 19px "DejaVu Sans Condensed", Arial, sans-serif', 18, false);
+        row(bot, botText, 'bold 19px "DejaVu Sans Condensed", Arial, sans-serif', 223, true);
       }
 
       draw();

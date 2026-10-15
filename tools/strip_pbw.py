@@ -12,12 +12,28 @@ paths and any extra words given with --deny, and fails if it finds one.
 """
 import argparse
 import re
+import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# The SDK ships a JavaScript minifier (uglify-js) next to webpack; the phone-side bundle is
+# minified with it when it can be found (about 14% smaller before zipping).
+UGLIFY_CANDIDATES = [Path.home() / ".local/share/pebble-sdk/SDKs/current/node_modules/.bin/uglifyjs"]
 HOME_PATH = re.compile(rb"/(?:home|Users)/[A-Za-z0-9._-]+|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+")
+
+
+def minify(js):
+    tool = shutil.which("uglifyjs") or next((str(c) for c in UGLIFY_CANDIDATES if c.exists()), None)
+    if not tool:
+        return js
+    try:
+        out = subprocess.run([tool, "-c", "-m"], input=js, capture_output=True, check=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return js
+    return out if out else js
 
 
 def main():
@@ -34,7 +50,10 @@ def main():
             if info.filename.endswith(".map"):
                 dropped.append(info.filename)
                 continue
-            zout.writestr(info, zin.read(info.filename))
+            data = zin.read(info.filename)
+            if info.filename == "pebble-js-app.js":
+                data = minify(data)
+            zout.writestr(info, data)
             kept.append(info.filename)
 
     problems = []

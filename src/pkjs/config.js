@@ -11,15 +11,46 @@ var VIBE_PATTERNS = [
 
 // What a corner of the top or bottom bezel can show.
 var CORNER_CHOICES = [
-  { "label": "Battery level", "value": "battery" },
-  { "label": "Step count", "value": "steps" },
-  { "label": "Distance", "value": "distance" },
-  { "label": "Heart rate", "value": "hr" },
   { "label": "Custom text", "value": "text" },
-  { "label": "Nothing", "value": "none" }
+  { "label": "Nothing", "value": "none" },
+  { "label": "Battery level", "value": "battery" },
+  { "label": "Health: step count", "value": "steps" },
+  { "label": "Health: distance", "value": "distance" },
+  { "label": "Health: heart rate", "value": "hr" },
+  { "label": "Weather: feels like", "value": "feels" },
+  { "label": "Weather: high and low", "value": "hilo" },
+  { "label": "Weather: conditions", "value": "cond" },
+  { "label": "Weather: chance of rain", "value": "chance" },
+  { "label": "Weather: rain amount", "value": "rain" },
+  { "label": "Weather: snowfall", "value": "snowfall" },
+  { "label": "Weather: snow depth", "value": "snowdepth" },
+  { "label": "Weather: humidity", "value": "humidity" },
+  { "label": "Weather: dew point", "value": "dew" },
+  { "label": "Weather: cloud cover", "value": "cloud" },
+  { "label": "Weather: visibility", "value": "visibility" },
+  { "label": "Weather: pressure", "value": "pressure" },
+  { "label": "Weather: wind speed", "value": "wind" },
+  { "label": "Weather: wind gusts", "value": "gust" },
+  { "label": "Weather: wind direction", "value": "winddir" },
+  { "label": "Weather: UV index", "value": "uv" },
+  { "label": "Weather: UV index maximum", "value": "uvmax" },
+  { "label": "Weather: sunrise", "value": "sunrise" },
+  { "label": "Weather: sunset", "value": "sunset" },
+  { "label": "Air quality (AQI)", "value": "aqi" },
+  { "label": "Air: PM2.5", "value": "pm25" },
+  { "label": "Air: PM10", "value": "pm10" },
+  { "label": "Air: ozone", "value": "ozone" },
+  { "label": "Air: nitrogen dioxide", "value": "no2" },
+  { "label": "Air: sulphur dioxide", "value": "so2" },
+  { "label": "Air: carbon monoxide", "value": "co" },
+  { "label": "Air: dust", "value": "dust" }
 ];
 // The water-resistance badge: only offered on the bottom bezel.
 var WR_CHOICE = { "label": "WR badge", "value": "wr" };
+// The bottom corners also offer the WR badge, right after "Nothing".
+function withWR(choices) {
+  return choices.slice(0, 2).concat([WR_CHOICE], choices.slice(2));
+}
 
 module.exports = [
   { "type": "heading", "defaultValue": "LCD 221" },
@@ -117,13 +148,48 @@ module.exports = [
           { "label": "Kilometres", "value": "km" },
           { "label": "Miles", "value": "mi" }
         ]
+      },
+      {
+        "type": "select", "messageKey": "WeatherUnits", "label": "Wind and rain units", "defaultValue": "auto",
+        "description": "Follow watch shows mph and inches when your watch uses imperial units, otherwise km/h and millimetres.",
+        "options": [
+          { "label": "Follow watch", "value": "auto" },
+          { "label": "Metric (km/h, mm)", "value": "metric" },
+          { "label": "Imperial (mph, in)", "value": "imperial" }
+        ]
+      },
+      {
+        "type": "select", "messageKey": "AQIScale", "label": "Air quality scale", "defaultValue": "us",
+        "description": "US AQI goes from 0 to 500; the European one from 0 to 100 and above.",
+        "options": [
+          { "label": "US AQI", "value": "us" },
+          { "label": "European AQI", "value": "eu" }
+        ]
       }
     ]
   },
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Top bezel" },
+      { "type": "heading", "defaultValue": "Weather" },
+      {
+        "type": "select", "messageKey": "WeatherRefresh", "label": "Update every", "defaultValue": "30",
+        "description": "How often the phone fetches the temperature. Longer periods mean fewer requests and less battery use; the temperature stays shown for twice that period.",
+        "options": [
+          { "label": "30 minutes", "value": "30" },
+          { "label": "1 hour", "value": "60" },
+          { "label": "2 hours", "value": "120" },
+          { "label": "3 hours", "value": "180" },
+          { "label": "6 hours", "value": "360" },
+          { "label": "12 hours", "value": "720" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Bezels" },
       {
         "type": "select", "messageKey": "TopLeft", "label": "Top left", "defaultValue": "battery",
         "options": CORNER_CHOICES
@@ -143,16 +209,10 @@ module.exports = [
         "defaultValue": "WR 3ATM",
         "description": "Shown in capitals.",
         "attributes": { "maxlength": 19, "autocapitalize": "characters" }
-      }
-    ]
-  },
-  {
-    "type": "section",
-    "items": [
-      { "type": "heading", "defaultValue": "Bottom bezel" },
+      },
       {
         "type": "select", "messageKey": "BottomLeft", "label": "Bottom left", "defaultValue": "wr",
-        "options": CORNER_CHOICES.concat([WR_CHOICE])
+        "options": withWR(CORNER_CHOICES)
       },
       {
         "type": "input", "messageKey": "BottomLeftText", "label": "Bottom left text",
@@ -162,7 +222,7 @@ module.exports = [
       },
       {
         "type": "select", "messageKey": "BottomRight", "label": "Bottom right", "defaultValue": "text",
-        "options": CORNER_CHOICES.concat([WR_CHOICE])
+        "options": withWR(CORNER_CHOICES)
       },
       {
         "type": "input", "messageKey": "BottomRightText", "label": "Bottom right text",

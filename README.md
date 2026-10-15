@@ -10,25 +10,29 @@ The red marks on the screen edges (where the watch's buttons are) are optional. 
 
 ![Inverted colors](docs/watchface-inverted.png) ![Seconds](docs/watchface-seconds.png)
 
-Version 1.3.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
+Version 1.4.0. Pebble Time 2 only (platform `emery`, 200x228 screen). Built and tested with Pebble SDK 4.33.1.
 
 ## What it shows
 
 | Area | Content |
 |---|---|
-| Top bezel | Two corners, each showing the battery level, steps, distance, heart rate, your own text or nothing (settings). Default: battery level and step count |
+| Top bezel | Two corners, each showing the battery level, steps, distance, heart rate, a weather or air quality reading (list below), your own text or nothing (settings). Default: battery level and step count |
 | Weekday | Dot-matrix day name (SUN, MON, ...) |
 | Indicator box | **BT** phone connected, **CHG** charging (it becomes **FULL** once the battery is full and the watch is still on the charger), **SIG** an audible hourly chime is set, Quiet Time is off and the watch's speaker is not muted, **MUTE** Quiet Time on. Active labels are black (white when inverted); inactive ones use the same faint gray as the unlit segments |
 | Time | Large 7-segment digits (slanted by default). A **P** lights up for PM in 12-hour mode |
 | Date | DD-MM or MM-DD. A **DST** label above it lights while daylight saving time is in effect in your time zone |
 | Right box | Temperature (°C or °F) or seconds |
-| Bottom bezel | Two more corners with the same choices, plus the **WR** badge. Heart rate in a bottom corner is shown as an **HR** badge followed by the value (in the top corners as plain text, `HR 72`). Steps in a bottom corner are shown as the number followed by a footprints icon (in the top corners as `8,432 STEPS`). Default: the WR badge and the text `PEBBLE` |
+| Bottom bezel | Two more corners with the same choices, plus the **WR** badge. Heart rate in a bottom corner is shown as an **HR** badge followed by the value (in the top corners as plain text, `HR 72`). Steps in any bezel corner are shown as the number followed by a footprints icon. Default: the WR badge and the text `PEBBLE` |
+
+A kind of information (battery, steps, distance, heart rate, UV index, wind, rain, humidity, WR badge) can only be shown in one corner at a time: the settings page greys out the choices another corner already uses. Custom text and Nothing can be used in any number of corners.
+
+Weather and air quality readings a corner can show (from Open-Meteo): feels-like temperature, today's high and low, conditions (clear, partly cloudy, cloudy, fog, drizzle, rain, snow, showers, storm), chance of rain, rain amount, snowfall, snow depth, humidity, dew point, cloud cover, visibility, pressure, wind speed, gusts and direction, UV index and today's maximum, sunrise and sunset, the air quality index (US or European scale) and the pollutants PM2.5, PM10, ozone, nitrogen dioxide, sulphur dioxide, carbon monoxide and dust. Temperatures follow the temperature unit; speeds, rain, snow, pressure and visibility follow "Wind and rain units" (km/h, mm, cm, hPa, km or mph, inches, inHg, miles); sunrise and sunset follow the 12/24-hour setting and are the times at your location.
 
 Notes:
 
 - Battery is reported by the watch in 10% steps, so it moves 100%, 90%, 80%, ...
 - Steps and distance come from Pebble Health (distance in miles or kilometres, following the watch's units unless you choose). Heart rate is the latest reading the watch has; it shows `--` when there is none.
-- Weather is fetched by the phone from [Open-Meteo](https://open-meteo.com) using its location, at start-up and about every 30 minutes. To save battery, the watch only asks while the temperature can be on screen (not with seconds always on), the phone is connected and the last reading is older than 25 minutes, and the phone app waits at least 5 minutes between fetches (25 minutes when the face is merely opened again). It shows `--` if the data is more than 3 hours old.
+- Weather (temperature, a weather or air quality reading (list below)) is fetched by the phone from [Open-Meteo](https://open-meteo.com) (the air quality is a second request to its air quality service, made only while a corner shows it) using its location, at start-up and then every 30 minutes by default (wind and rain follow the watch's units or the setting "Wind and rain units"; setting "Update every": 30 minutes, 1, 2, 3, 6 or 12 hours; longer means fewer requests). To save battery, the watch only asks while the temperature can be on screen (not with seconds always on), the phone is connected and the last reading is older than the interval minus 5 minutes, and the phone app waits at least 5 minutes between fetches (the interval minus 5 minutes when the face is merely opened again). It shows `--` if the data is older than twice the interval (at least 3 hours).
 - Unlit segments are drawn as a faint ghost, like a real LCD (can be switched off).
 - Optional red marks (5 px wide, a little taller than the weekday, the inside corners rounded) along the LCD's left and right edges show where the watch's four buttons are: one on the left (at the weekday), and three on the right (opposite it, one lower in the middle, and one mirrored below that, just reaching into the bottom bezel). Off by default (setting "Button markers").
 - The Time 2's backlight is colour-capable. By default the watch face leaves it at your normal system colour, but it can tint it instead (amber like the original's LED, one of ten presets, or any of the 64 colours in the app's picker).
@@ -50,11 +54,14 @@ A preview at the top of the page (tap it to hide it) follows your choices; it is
 | | Seconds duration | 30 s. 5 to 120 in steps of 5: how long the seconds tick after a shake (shown only for "After a wrist shake") |
 | Units | Temperature unit | **Follow watch** (Fahrenheit when the watch uses imperial units, otherwise Celsius), Celsius, Fahrenheit |
 | | Distance unit | **Follow watch** (miles when the watch uses imperial units, otherwise kilometres), Kilometres, Miles |
-| Top bezel | Top left | **Battery level**, step count, distance, heart rate, custom text, nothing |
+| | Wind and rain units | **Follow watch** (mph and inches when the watch uses imperial units, otherwise km/h and millimetres), Metric, Imperial |
+| | Air quality scale | **US AQI** (0 to 500), European AQI |
+| Weather | Update every | **30 minutes**, 1, 2, 3, 6 or 12 hours |
+| Bezels | Top left | **Battery level**, step count, distance, heart rate, a weather or air quality reading (list below), custom text, nothing |
 | | Top left text | `30 DAY BATT` (up to 19 characters, capitals; only shown for custom text) |
-| | Top right | **Step count**, battery level, distance, heart rate, custom text, nothing |
+| | Top right | **Step count**, battery level, distance, heart rate, a weather or air quality reading (list below), custom text, nothing |
 | | Top right text | `WR 3ATM` (only shown for custom text) |
-| Bottom bezel | Bottom left | **WR badge**, battery level, step count, distance, heart rate, custom text, nothing |
+| | Bottom left | **WR badge**, battery level, step count, distance, heart rate, a weather or air quality reading (list below), custom text, nothing |
 | | Bottom left text | Empty (only shown for custom text) |
 | | Bottom right | **Custom text**, battery level, step count, distance, heart rate, WR badge, nothing |
 | | Bottom right text | `PEBBLE` (only shown for custom text) |
@@ -72,7 +79,7 @@ A preview at the top of the page (tap it to hide it) follows your choices; it is
 | | Play chime | A button (shown while a chime is chosen) that plays the chosen chime once when you tap Save, so you can hear it |
 
 There is no vibration during Quiet Time (except the hourly chime when "Respect Quiet Time" is off). When the two top-bezel texts are both long, the right
-text takes the width it needs and the left one is cut with "..." to fit.
+text takes the width it needs and the left one is cut off to fit.
 
 ## Building and installing
 
@@ -146,7 +153,7 @@ vibrations, the backlight colours, live heart rate, and every control on the set
 | `src/pkjs/custom-clay.js` | Runs on the settings page: hides options that don't apply, Reset button |
 | `tools/gen_segments.py` | Regenerates `segments.h` from the 7-Segment font |
 | `tools/gen_menu_icon.py` | Redraws the 25x25 menu icon (needs Pillow) |
-| `tools/strip_pbw.py` | Makes a release copy of the built app with the debugging map removed, and checks it for identifying text |
+| `tools/strip_pbw.py` | Makes a release copy of the built app with the debugging map removed and the phone-side code minified, and checks it for identifying text |
 | `resources/images/menu_icon.png` | The menu icon: the watch face's thumbnail in the Pebble app's list |
 | `package.json` | App metadata, permissions, and the app-message keys |
 
@@ -164,7 +171,7 @@ vibrations, the backlight colours, live heart rate, and every control on the set
 - The indicator box labels are drawn with the system font and then squashed in the framebuffer to
   10 pixels tall, one letter at a time (the row dropped is from inside each letter, never from a
   horizontal bar, so every bar keeps the same thickness); "BT" is also widened.
-- The weekday is a 5x5 dot matrix, upright like the original. The bezel text uses the system fonts.
+- The weekday is a 5x5 dot matrix, upright like the original. The bezel text is the system font Gothic 24 bold; it is made once (and again when the text changes) and kept as a small bitmap, which keeps redraws cheap.
 - Colours come from one place, `apply_theme()`: normal (black on white) or inverted (white on black),
   each with its own ghost and label shades. The case colour is independent of the theme.
 

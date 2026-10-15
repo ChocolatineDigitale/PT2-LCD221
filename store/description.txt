@@ -3,7 +3,7 @@ A Pebble Time 2 watch face that recreates the look of the Casio W-221H: a crisp 
 WHAT IT SHOWS
 - Time (12 or 24 hour), weekday, date and a DST indicator
 - Temperature or seconds
-- Four bezel corners, each showing battery level, steps, distance, heart rate, your own text or nothing, plus an optional WR badge
+- Four bezel corners, each showing battery level, steps, distance, heart rate, about thirty weather and air quality readings (feels like, high/low, rain chance, wind, UV, sunrise, AQI and more), your own text or nothing, plus an optional WR badge
 - Indicators for phone, charging, hourly chime and Quiet Time
 
 SETTINGS
